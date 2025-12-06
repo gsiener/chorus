@@ -6,8 +6,8 @@ export interface ProductboardConfig extends IntegrationConfig {
 }
 
 export class ProductboardIntegration extends BaseIntegration {
-  constructor(private productboardConfig: ProductboardConfig) {
-    super(productboardConfig);
+  constructor(private _productboardConfig: ProductboardConfig) {
+    super(_productboardConfig);
   }
 
   getName(): string {
@@ -21,7 +21,7 @@ export class ProductboardIntegration extends BaseIntegration {
 
     // TODO: Implement Productboard API integration
     // Fetch notes and feature requests
-    console.log(`Fetching Productboard feedback since ${since}`);
+    console.log(`Fetching Productboard feedback since ${since} with token:`, this._productboardConfig.apiToken ? '***' : 'none');
     return [];
   }
 }

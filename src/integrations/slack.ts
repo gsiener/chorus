@@ -7,8 +7,8 @@ export interface SlackConfig extends IntegrationConfig {
 }
 
 export class SlackIntegration extends BaseIntegration {
-  constructor(private slackConfig: SlackConfig) {
-    super(slackConfig);
+  constructor(private _slackConfig: SlackConfig) {
+    super(_slackConfig);
   }
 
   getName(): string {
@@ -23,7 +23,7 @@ export class SlackIntegration extends BaseIntegration {
     // TODO: Implement Slack API integration
     // Use @slack/web-api to fetch messages from configured channels
     // Filter for feedback-related messages
-    console.log(`Fetching Slack feedback since ${since}`);
+    console.log(`Fetching Slack feedback since ${since} from channels:`, this._slackConfig.channels);
     return [];
   }
 }

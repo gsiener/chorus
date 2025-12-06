@@ -8,8 +8,8 @@ export interface ZendeskConfig extends IntegrationConfig {
 }
 
 export class ZendeskIntegration extends BaseIntegration {
-  constructor(private zendeskConfig: ZendeskConfig) {
-    super(zendeskConfig);
+  constructor(private _zendeskConfig: ZendeskConfig) {
+    super(_zendeskConfig);
   }
 
   getName(): string {
@@ -23,7 +23,7 @@ export class ZendeskIntegration extends BaseIntegration {
 
     // TODO: Implement Zendesk API integration
     // Fetch tickets with feedback tags or specific views
-    console.log(`Fetching Zendesk feedback since ${since}`);
+    console.log(`Fetching Zendesk feedback since ${since} from subdomain:`, this._zendeskConfig.subdomain);
     return [];
   }
 }

@@ -10,11 +10,13 @@
     "start": "node dist/index.js",
     "test": "vitest",
     "test:watch": "vitest --watch",
+    "test:run": "vitest run",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "type-check": "tsc --noEmit",
     "analyze": "tsx src/jobs/analyze.ts",
-    "ingest": "tsx src/jobs/ingest.ts"
+    "ingest": "tsx src/jobs/ingest.ts",
+    "prepare": "husky"
   },
   "keywords": [
     "feedback",
@@ -34,6 +36,7 @@
     "@typescript-eslint/eslint-plugin": "^8.15.0",
     "@typescript-eslint/parser": "^8.15.0",
     "eslint": "^9.15.0",
+    "husky": "^9.1.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

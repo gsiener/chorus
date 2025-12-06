@@ -6,8 +6,8 @@ export interface IntercomConfig extends IntegrationConfig {
 }
 
 export class IntercomIntegration extends BaseIntegration {
-  constructor(private intercomConfig: IntercomConfig) {
-    super(intercomConfig);
+  constructor(private _intercomConfig: IntercomConfig) {
+    super(_intercomConfig);
   }
 
   getName(): string {
@@ -21,7 +21,7 @@ export class IntercomIntegration extends BaseIntegration {
 
     // TODO: Implement Intercom API integration
     // Fetch conversations, filter for customer feedback
-    console.log(`Fetching Intercom feedback since ${since}`);
+    console.log(`Fetching Intercom feedback since ${since} with token:`, this._intercomConfig.apiToken ? '***' : 'none');
     return [];
   }
 }

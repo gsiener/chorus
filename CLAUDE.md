@@ -8,6 +8,21 @@ Chorus is an intelligent agent that monitors and synthesizes product feedback fr
 
 Inspired by Superhuman's PMF engine methodology from https://review.firstround.com/how-superhuman-built-an-engine-to-find-product-market-fit/
 
+## Development Philosophy
+
+**Test-Driven Development (TDD)**: This project follows TDD principles. When implementing new features or fixing bugs:
+1. Write failing tests first that describe the desired behavior
+2. Implement the minimum code needed to make tests pass
+3. Refactor while keeping tests green
+4. All tests must pass before committing code
+
+**Test Requirements**:
+- All tests must pass before committing (enforced by pre-commit hook)
+- New functions, classes, and modules must have corresponding tests
+- Integration points should have tests (even if mocked initially)
+- Zod schemas should have validation tests
+- Pre-commit hook runs `npm run type-check` and `npm run test:run` automatically
+
 ## Common Commands
 
 ### Development
@@ -16,8 +31,10 @@ Inspired by Superhuman's PMF engine methodology from https://review.firstround.c
 - `npm run type-check` - Check types without building
 
 ### Testing & Linting
-- `npm run test` - Run all tests with Vitest
-- `npm run test:watch` - Run tests in watch mode
+- `npm run test` - Run all tests with Vitest in watch mode
+- `npm run test:run` - Run all tests once (used in CI and pre-commit)
+- `npm run test:watch` - Run tests in watch mode (alias for npm test)
+- `vitest run src/types/feedback.test.ts` - Run a single test file
 - `npm run lint` - Lint source code
 - `npm run lint:fix` - Auto-fix linting issues
 
@@ -39,11 +56,12 @@ The codebase follows a modular architecture with clear separation of concerns:
 - Integrations return normalized `FeedbackItem` objects
 
 **Analysis Engine** (`src/analysis/`)
-- `FeedbackAnalyzer` uses Claude API to:
+- `FeedbackAnalyzer` uses Claude API (claude-3-5-sonnet-20241022) to:
   - Classify individual feedback items (category, sentiment, themes)
   - Generate comprehensive PMF reports with insights and recommendations
 - Two-phase analysis: item-level → aggregate synthesis
 - Calculates PMF metrics including sentiment distribution and theme trends
+- Prompts request JSON responses for reliable structured output parsing
 
 **Storage Layer** (`src/storage/`)
 - File-based storage in configurable data directory
@@ -91,7 +109,9 @@ See `.env.example` for complete configuration options.
 
 **Extensible Integrations**: BaseIntegration pattern makes adding new data sources straightforward - implement fetchFeedback() and normalization logic.
 
-**Two-Phase Analysis**: Individual item classification followed by aggregate synthesis allows Claude to identify patterns across large feedback sets while maintaining token efficiency.
+**Two-Phase Analysis**: Individual item classification followed by aggregate synthesis allows Claude to identify patterns across large feedback sets while maintaining token efficiency. Report synthesis is limited to 100 most recent items to respect token limits.
+
+**Zod Schema Validation**: All data types use Zod schemas for runtime validation and type inference, ensuring type safety at boundaries.
 
 ## Adding New Integrations
 
@@ -104,12 +124,28 @@ See `.env.example` for complete configuration options.
 
 ## Development Workflow
 
-For testing integrations without live APIs:
-1. Add test data to `data/feedback/` as JSON
+### Testing Without Live APIs
+1. Add test data to `data/feedback/` as JSON with FeedbackItem structure
 2. Run `npm run analyze` to process existing data
 3. Check `data/reports/` for generated insights
 
-For adding analysis capabilities:
-- Modify prompts in `src/analysis/analyzer.ts`
-- Adjust `PMFMetrics` schema to capture new metrics
-- Update report generation logic
+### Modifying Analysis
+- Edit prompts in `src/analysis/analyzer.ts` (lines 13-29 for item analysis, 155-196 for report synthesis)
+- Adjust `PMFMetrics` schema in `src/types/analysis.ts` to capture new metrics
+- Update `calculateMetrics()` method in analyzer to compute new metrics
+
+### Integration Implementation Status
+All integrations in `src/integrations/` have TODO comments where API calls need implementation. Each needs:
+- API client library added to package.json
+- fetchFeedback() implementation with proper error handling
+- Data transformation to FeedbackItem format
+
+### TDD Workflow Example
+When adding a new feature:
+1. Create test file (e.g., `src/analysis/pmf-calculator.test.ts`)
+2. Write test cases describing expected behavior
+3. Run `npm test` - tests should fail (red)
+4. Implement the feature in source file
+5. Run `npm test` - tests should pass (green)
+6. Refactor if needed, ensuring tests stay green
+7. Commit only when all tests pass
