@@ -1,19 +1,14 @@
-# Anthropic API
-ANTHROPIC_API_KEY=your_api_key_here
+# Example development environment variables
+# Copy to .dev.vars for local development
 
-# Data Sources
+ANTHROPIC_API_KEY=your_api_key_here
+HONEYCOMB_API_KEY=your_honeycomb_key
+HONEYCOMB_DATASET=chorus-dev
+
+# Integration API keys (optional)
 SLACK_BOT_TOKEN=xoxb-your-token
-SLACK_CHANNELS=feedback,support
 INTERCOM_API_TOKEN=your_token
 ZENDESK_SUBDOMAIN=your_subdomain
 ZENDESK_API_TOKEN=your_token
 ZENDESK_EMAIL=your_email
 PRODUCTBOARD_API_TOKEN=your_token
-
-# Storage
-DATA_DIR=./data
-
-# Analysis Configuration
-ANALYSIS_SCHEDULE_CRON=0 9 * * 1
-PMF_THRESHOLD=0.4
-MIN_FEEDBACK_COUNT=10
