@@ -11,6 +11,12 @@ Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using C
 - `npm run dev` - Start local development server
 - `npm run deploy` - Deploy to Cloudflare Workers
 - `npm run typecheck` - Run TypeScript type checking
+- `npm test` - Run tests
+- `npm run test:watch` - Run tests in watch mode
+
+## Testing Requirements
+
+**Always write tests and ensure they pass before committing.** Tests are located in `src/__tests__/` using vitest with the Cloudflare Workers pool. CI will block merges if tests fail.
 
 ## Architecture
 
