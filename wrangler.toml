@@ -1,8 +1,10 @@
 name = "chorus"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Secrets (set via `wrangler secret put`):
 # - SLACK_BOT_TOKEN
 # - SLACK_SIGNING_SECRET
 # - ANTHROPIC_API_KEY
+# - HONEYCOMB_API_KEY

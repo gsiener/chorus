@@ -74,6 +74,7 @@ describe("generateResponse", () => {
     SLACK_BOT_TOKEN: "xoxb-test-token",
     SLACK_SIGNING_SECRET: "test-secret",
     ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
   };
 
   beforeEach(() => {

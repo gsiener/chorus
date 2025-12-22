@@ -1,8 +1,11 @@
+import { instrument } from "@microlabs/otel-cf-workers";
+import { trace } from "@opentelemetry/api";
 import type { Env, SlackPayload, SlackEventCallback } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage } from "./slack";
 import { convertThreadToMessages, generateResponse } from "./claude";
+import { traceConfig } from "./tracing";
 
-export default {
+const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
@@ -40,65 +43,97 @@ export default {
   },
 };
 
+export default instrument(handler, traceConfig);
+
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
   const { event } = payload;
   const { channel, ts, thread_ts, text, user } = event;
 
-  try {
-    // Determine the thread context
-    const threadTs = thread_ts ?? ts;
-    let messages;
+  const tracer = trace.getTracer("chorus");
+  await tracer.startActiveSpan("handleMention", async (span) => {
+    span.setAttributes({
+      "slack.channel": channel,
+      "slack.user": user,
+      "slack.thread_ts": thread_ts ?? ts,
+      "slack.is_thread": !!thread_ts,
+      "message.length": text.length,
+    });
 
-    if (thread_ts) {
-      // Fetch existing thread history
-      const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
-      messages = convertThreadToMessages(threadMessages, await getBotUserId(env));
-    } else {
-      // New thread - just use the current message
-      const botUserId = await getBotUserId(env);
-      messages = [
-        {
-          role: "user" as const,
-          content: text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim(),
-        },
-      ];
+    try {
+      // Determine the thread context
+      const threadTs = thread_ts ?? ts;
+      let messages;
+
+      if (thread_ts) {
+        // Fetch existing thread history
+        const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
+        span.setAttribute("thread.message_count", threadMessages.length);
+        messages = convertThreadToMessages(threadMessages, await getBotUserId(env));
+      } else {
+        // New thread - just use the current message
+        const botUserId = await getBotUserId(env);
+        messages = [
+          {
+            role: "user" as const,
+            content: text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim(),
+          },
+        ];
+      }
+
+      // Generate response with Claude
+      const response = await generateResponse(messages, env);
+      span.setAttribute("response.length", response.length);
+
+      // Post response to Slack
+      await postMessage(channel, response, threadTs, env);
+      span.setStatus({ code: 1 }); // OK
+    } catch (error) {
+      span.setStatus({ code: 2, message: String(error) }); // ERROR
+      span.recordException(error as Error);
+      console.error("Error handling mention:", error);
+      await postMessage(
+        channel,
+        "Sorry, I encountered an error processing your request.",
+        thread_ts ?? ts,
+        env
+      );
+    } finally {
+      span.end();
     }
-
-    // Generate response with Claude
-    const response = await generateResponse(messages, env);
-
-    // Post response to Slack
-    await postMessage(channel, response, threadTs, env);
-  } catch (error) {
-    console.error("Error handling mention:", error);
-    await postMessage(
-      channel,
-      "Sorry, I encountered an error processing your request.",
-      thread_ts ?? ts,
-      env
-    );
-  }
+  });
 }
 
 // Cache the bot user ID
 let cachedBotUserId: string | null = null;
 
 async function getBotUserId(env: Env): Promise<string> {
-  if (cachedBotUserId) {
-    return cachedBotUserId;
-  }
+  const tracer = trace.getTracer("chorus");
+  return tracer.startActiveSpan("getBotUserId", async (span) => {
+    const cacheHit = !!cachedBotUserId;
+    span.setAttribute("cache.hit", cacheHit);
 
-  const response = await fetch("https://slack.com/api/auth.test", {
-    headers: {
-      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-    },
+    if (cachedBotUserId) {
+      span.end();
+      return cachedBotUserId;
+    }
+
+    const response = await fetch("https://slack.com/api/auth.test", {
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      },
+    });
+
+    const data = (await response.json()) as { ok: boolean; user_id?: string };
+    span.setAttribute("slack.api.ok", data.ok);
+
+    if (data.ok && data.user_id) {
+      cachedBotUserId = data.user_id;
+      span.end();
+      return data.user_id;
+    }
+
+    span.setStatus({ code: 2, message: "Failed to get bot user ID" });
+    span.end();
+    throw new Error("Failed to get bot user ID");
   });
-
-  const data = (await response.json()) as { ok: boolean; user_id?: string };
-  if (data.ok && data.user_id) {
-    cachedBotUserId = data.user_id;
-    return data.user_id;
-  }
-
-  throw new Error("Failed to get bot user ID");
 }

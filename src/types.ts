@@ -2,6 +2,7 @@ export interface Env {
   SLACK_BOT_TOKEN: string;
   SLACK_SIGNING_SECRET: string;
   ANTHROPIC_API_KEY: string;
+  HONEYCOMB_API_KEY: string;
 }
 
 export interface SlackUrlVerification {

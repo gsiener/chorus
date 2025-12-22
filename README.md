@@ -9,6 +9,7 @@ A Cloudflare Worker-based Slack bot that responds to @mentions using Claude for 
 - A Cloudflare account
 - An Anthropic API key
 - Admin access to a Slack workspace
+- A Honeycomb account (optional, for tracing)
 
 ## Setup
 
@@ -70,6 +71,9 @@ npx wrangler secret put SLACK_SIGNING_SECRET
 
 npx wrangler secret put ANTHROPIC_API_KEY
 # Paste your Anthropic API key
+
+npx wrangler secret put HONEYCOMB_API_KEY
+# Paste your Honeycomb API key (for tracing)
 ```
 
 ### 4. Configure Slack Event Subscriptions
@@ -149,10 +153,23 @@ npm run test:watch  # Watch mode
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Worker entry point, routes Slack events |
+| `src/index.ts` | Worker entry point with tracing instrumentation |
+| `src/handler.ts` | Core request handling logic (untraced, for testing) |
 | `src/slack.ts` | Slack API: signature verification, thread fetching, message posting |
 | `src/claude.ts` | Claude API integration, system prompt, message conversion |
 | `src/types.ts` | TypeScript interfaces |
+| `src/tracing.ts` | OpenTelemetry configuration for Honeycomb |
+
+## Observability
+
+Chorus includes OpenTelemetry tracing that exports to Honeycomb. Traces include:
+
+- Request handling spans
+- Slack API calls (thread fetching, message posting)
+- Claude API calls with token counts and response lengths
+- Error tracking with exceptions
+
+To enable tracing, set the `HONEYCOMB_API_KEY` secret (see Setup). View traces in the [Honeycomb UI](https://ui.honeycomb.io/).
 
 ## Customization
 

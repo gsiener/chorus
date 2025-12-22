@@ -1,3 +1,4 @@
+import { trace } from "@opentelemetry/api";
 import type { Env, SlackMessage, SlackThreadResponse, SlackPostResponse } from "./types";
 
 export async function verifySlackSignature(
@@ -41,23 +42,37 @@ export async function fetchThreadMessages(
   threadTs: string,
   env: Env
 ): Promise<SlackMessage[]> {
-  const response = await fetch(
-    `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
-    {
-      headers: {
-        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-      },
+  const tracer = trace.getTracer("chorus");
+  return tracer.startActiveSpan("fetchThreadMessages", async (span) => {
+    span.setAttributes({
+      "slack.api.method": "conversations.replies",
+      "slack.channel": channel,
+      "slack.thread_ts": threadTs,
+    });
+
+    const response = await fetch(
+      `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
+      {
+        headers: {
+          Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        },
+      }
+    );
+
+    const data = (await response.json()) as SlackThreadResponse;
+    span.setAttribute("slack.api.ok", data.ok);
+
+    if (!data.ok || !data.messages) {
+      console.error("Failed to fetch thread:", data.error);
+      span.setStatus({ code: 2, message: data.error ?? "Unknown error" });
+      span.end();
+      return [];
     }
-  );
 
-  const data = (await response.json()) as SlackThreadResponse;
-
-  if (!data.ok || !data.messages) {
-    console.error("Failed to fetch thread:", data.error);
-    return [];
-  }
-
-  return data.messages;
+    span.setAttribute("slack.message_count", data.messages.length);
+    span.end();
+    return data.messages;
+  });
 }
 
 export async function postMessage(
@@ -66,25 +81,39 @@ export async function postMessage(
   threadTs: string | undefined,
   env: Env
 ): Promise<boolean> {
-  const response = await fetch("https://slack.com/api/chat.postMessage", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      channel,
-      text,
-      thread_ts: threadTs,
-    }),
+  const tracer = trace.getTracer("chorus");
+  return tracer.startActiveSpan("postMessage", async (span) => {
+    span.setAttributes({
+      "slack.api.method": "chat.postMessage",
+      "slack.channel": channel,
+      "slack.thread_ts": threadTs ?? "",
+      "message.length": text.length,
+    });
+
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel,
+        text,
+        thread_ts: threadTs,
+      }),
+    });
+
+    const data = (await response.json()) as SlackPostResponse;
+    span.setAttribute("slack.api.ok", data.ok);
+
+    if (!data.ok) {
+      console.error("Failed to post message:", data.error);
+      span.setStatus({ code: 2, message: data.error ?? "Unknown error" });
+      span.end();
+      return false;
+    }
+
+    span.end();
+    return true;
   });
-
-  const data = (await response.json()) as SlackPostResponse;
-
-  if (!data.ok) {
-    console.error("Failed to post message:", data.error);
-    return false;
-  }
-
-  return true;
 }

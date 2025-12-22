@@ -100,6 +100,7 @@ describe("fetchThreadMessages", () => {
     SLACK_BOT_TOKEN: "xoxb-test-token",
     SLACK_SIGNING_SECRET: "test-secret",
     ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
   };
 
   beforeEach(() => {
@@ -149,6 +150,7 @@ describe("postMessage", () => {
     SLACK_BOT_TOKEN: "xoxb-test-token",
     SLACK_SIGNING_SECRET: "test-secret",
     ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
   };
 
   beforeEach(() => {

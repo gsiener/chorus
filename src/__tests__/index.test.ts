@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import worker from "../index";
+import { handler } from "../handler";
 import type { Env } from "../types";
 
 describe("Worker", () => {
@@ -7,6 +7,7 @@ describe("Worker", () => {
     SLACK_BOT_TOKEN: "xoxb-test-token",
     SLACK_SIGNING_SECRET: "test-signing-secret",
     ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
   };
 
   const mockCtx = {
@@ -55,7 +56,7 @@ describe("Worker", () => {
 
   it("returns 405 for non-POST requests", async () => {
     const request = new Request("https://example.com", { method: "GET" });
-    const response = await worker.fetch(request, mockEnv, mockCtx);
+    const response = await handler.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(405);
     expect(await response.text()).toBe("Method not allowed");
@@ -71,7 +72,7 @@ describe("Worker", () => {
       body: "{}",
     });
 
-    const response = await worker.fetch(request, mockEnv, mockCtx);
+    const response = await handler.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(401);
     expect(await response.text()).toBe("Invalid signature");
@@ -84,7 +85,7 @@ describe("Worker", () => {
     });
     const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
 
-    const response = await worker.fetch(request, mockEnv, mockCtx);
+    const response = await handler.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("test-challenge-token");
@@ -106,7 +107,7 @@ describe("Worker", () => {
     });
     const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
 
-    const response = await worker.fetch(request, mockEnv, mockCtx);
+    const response = await handler.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("OK");
@@ -128,7 +129,7 @@ describe("Worker", () => {
     });
     const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
 
-    const response = await worker.fetch(request, mockEnv, mockCtx);
+    const response = await handler.fetch(request, mockEnv, mockCtx);
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("OK");
