@@ -13,3 +13,18 @@ id = "bf1f6f46baef45abb76000eaa432814f"
 # - SLACK_SIGNING_SECRET
 # - ANTHROPIC_API_KEY
 # - HONEYCOMB_API_KEY
+
+# Native OpenTelemetry export to Honeycomb
+# Note: Create "honeycomb" destination in Cloudflare Dashboard first:
+#   Workers & Pages → chorus → Observability → Destinations
+#   Endpoint: https://api.honeycomb.io/v1/traces
+#   Header: x-honeycomb-team: <your API key>
+[observability.traces]
+enabled = true
+destinations = ["honeycomb"]
+head_sampling_rate = 1.0
+
+[observability.logs]
+enabled = true
+destinations = ["honeycomb"]
+head_sampling_rate = 1.0

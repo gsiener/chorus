@@ -13,7 +13,15 @@ Voice:
 Style:
 - Keep it concise — this is Slack, not a memo
 - Light emoji use when it fits naturally 👍 — don't force it
-- Slack formatting (bold, bullets) only when it genuinely helps
+
+Slack Formatting (IMPORTANT - use these exact formats):
+- Bold: *text* (single asterisks, NOT double)
+- Italic: _text_ (underscores)
+- Code: \`code\` (backticks)
+- Code blocks: \`\`\`code\`\`\`
+- Bullets: use • or - at start of line
+- NO markdown headers (# or ##) — use *bold* instead
+- NO markdown links [text](url) — just paste URLs or use <url|text>
 
 Greetings:
 - When someone says hi, respond warmly using "I" and mention you can help with product/roadmap/strategy
@@ -49,6 +57,19 @@ function cleanSlackMessage(text: string, botUserId: string): string {
 
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 const CLAUDE_MAX_TOKENS = 1024;
+
+/**
+ * Convert standard markdown to Slack's mrkdwn format
+ */
+function convertToSlackFormat(text: string): string {
+  return text
+    // Convert **bold** to *bold* (must do before single asterisk handling)
+    .replace(/\*\*([^*]+)\*\*/g, '*$1*')
+    // Convert markdown headers to bold
+    .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
+    // Convert [text](url) links to <url|text>
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+}
 
 export async function generateResponse(
   messages: ClaudeMessage[],
@@ -96,7 +117,8 @@ export async function generateResponse(
     }
 
     const data = (await response.json()) as ClaudeResponse;
-    const text = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
+    const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
+    const text = convertToSlackFormat(rawText);
     span.setAttribute("claude.response_length", text.length);
     span.end();
     return text;

@@ -15,28 +15,126 @@ export interface ExtractedFile {
 
 /**
  * Download a file from Slack using the bot token
+ * Handles redirects by manually following them with auth headers
  */
 async function downloadSlackFile(file: SlackFile, env: Env): Promise<ArrayBuffer> {
-  const url = file.url_private_download || file.url_private;
+  let url = file.url_private_download || file.url_private;
+  console.log(`Fetching from URL: ${url}`);
 
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-    },
-  });
+  // Follow redirects manually to preserve auth header
+  let response: Response;
+  let redirectCount = 0;
+  const maxRedirects = 5;
 
-  if (!response.ok) {
-    throw new Error(`Failed to download file: ${response.status}`);
+  while (redirectCount < maxRedirects) {
+    response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      },
+      redirect: 'manual', // Don't auto-follow redirects
+    });
+
+    console.log(`Response status: ${response.status}, content-type: ${response.headers.get('content-type')}`);
+
+    // Handle redirects
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new Error(`Redirect without location header`);
+      }
+      console.log(`Following redirect to: ${location}`);
+      url = location;
+      redirectCount++;
+      continue;
+    }
+
+    break;
   }
 
-  return response.arrayBuffer();
+  if (!response!.ok) {
+    const text = await response!.text();
+    console.error(`Download failed: ${text.substring(0, 500)}`);
+    throw new Error(`Failed to download file: ${response!.status}`);
+  }
+
+  const buffer = await response!.arrayBuffer();
+
+  // Check if we got HTML instead of the file (auth redirect)
+  const firstBytes = new Uint8Array(buffer.slice(0, 20));
+  const header = String.fromCharCode(...firstBytes);
+  console.log(`File header: ${header}`);
+
+  if (header.includes('<!DOCTYPE') || header.includes('<html')) {
+    throw new Error('Got HTML instead of file - auth may have failed');
+  }
+
+  return buffer;
 }
 
 /**
- * Extract text from a PDF using Claude's document understanding
+ * Upload file to Anthropic Files API and get file_id
  */
-async function extractPdfWithClaude(buffer: ArrayBuffer, env: Env): Promise<string> {
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+async function uploadToAnthropicFiles(buffer: ArrayBuffer, filename: string, env: Env): Promise<string> {
+  console.log(`Uploading ${filename} to Anthropic Files API...`);
+
+  // Create form data with the file
+  const formData = new FormData();
+  const blob = new Blob([buffer], { type: "application/pdf" });
+  formData.append("file", blob, filename);
+
+  const response = await fetch("https://api.anthropic.com/v1/files", {
+    method: "POST",
+    headers: {
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "files-api-2025-04-14",
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Files API upload error: ${response.status} - ${error}`);
+  }
+
+  const data = (await response.json()) as { id: string };
+  console.log(`File uploaded, id: ${data.id}`);
+  return data.id;
+}
+
+/**
+ * Convert ArrayBuffer to base64 in chunks (to avoid stack overflow)
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 32768;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Extract text from a PDF using Claude with base64 and streaming
+ */
+async function extractPdfWithClaude(buffer: ArrayBuffer, filename: string, env: Env): Promise<string> {
+  // Verify PDF magic bytes
+  const header = new Uint8Array(buffer.slice(0, 5));
+  const pdfMagic = String.fromCharCode(...header);
+  console.log(`PDF magic bytes: "${pdfMagic}"`);
+
+  if (!pdfMagic.startsWith('%PDF')) {
+    throw new Error(`Not a valid PDF file (header: ${pdfMagic})`);
+  }
+
+  // Convert to base64
+  const base64 = arrayBufferToBase64(buffer);
+  console.log(`Base64 encoded: ${base64.length} chars`);
+
+  console.log("Calling Claude API with base64 PDF and streaming...");
+  const startTime = Date.now();
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -44,10 +142,12 @@ async function extractPdfWithClaude(buffer: ArrayBuffer, env: Env): Promise<stri
       "Content-Type": "application/json",
       "x-api-key": env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
+      "anthropic-beta": "pdfs-2024-09-25",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-5-haiku-20241022",
       max_tokens: 8192,
+      stream: true,
       messages: [
         {
           role: "user",
@@ -62,7 +162,7 @@ async function extractPdfWithClaude(buffer: ArrayBuffer, env: Env): Promise<stri
             },
             {
               type: "text",
-              text: "Extract all the text content from this document. Return only the extracted text, preserving the structure and formatting as much as possible. Do not add any commentary or explanations.",
+              text: "Extract all text from this PDF. Return only the text content.",
             },
           ],
         },
@@ -70,13 +170,52 @@ async function extractPdfWithClaude(buffer: ArrayBuffer, env: Env): Promise<stri
     }),
   });
 
+  console.log(`Claude API initial response in ${Date.now() - startTime}ms, status: ${response.status}`);
+
   if (!response.ok) {
     const error = await response.text();
     throw new Error(`Claude API error: ${response.status} - ${error}`);
   }
 
-  const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
-  return data.content[0]?.text ?? "";
+  // Process the stream
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let extractedText = "";
+  let chunkCount = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    chunkCount++;
+    const chunk = decoder.decode(value, { stream: true });
+
+    // Parse SSE events - each line starts with "data: " followed by JSON
+    const lines = chunk.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+
+        try {
+          const event = JSON.parse(data);
+          // Extract text from content_block_delta events
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            extractedText += event.delta.text;
+          }
+        } catch {
+          // Skip non-JSON lines
+        }
+      }
+    }
+  }
+
+  console.log(`Streaming complete: ${chunkCount} chunks, ${extractedText.length} chars in ${Date.now() - startTime}ms`);
+  return extractedText;
 }
 
 /**
@@ -99,7 +238,12 @@ export async function extractFileContent(
     textMimeTypes.includes(file.mimetype) ||
     file.mimetype.startsWith("text/");
 
-  if (!isPdf && !isText) {
+  if (isPdf) {
+    // PDF processing times out in Cloudflare Workers - guide user to use text command
+    throw new Error('PDF upload not supported yet. Please copy the text from your PDF and use: @Chorus add doc "Title": [paste text here]');
+  }
+
+  if (!isText) {
     return null;
   }
 
@@ -110,8 +254,8 @@ export async function extractFileContent(
 
     let content: string;
     if (isPdf) {
-      console.log("Extracting PDF with Claude...");
-      content = await extractPdfWithClaude(buffer, env);
+      console.log("Extracting PDF with Claude Files API...");
+      content = await extractPdfWithClaude(buffer, file.name, env);
       console.log(`Extracted ${content.length} chars from PDF`);
     } else {
       // Text file - decode as UTF-8
