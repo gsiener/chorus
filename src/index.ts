@@ -1,6 +1,6 @@
 import type { Env, SlackPayload, SlackEventCallback } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
-import { convertThreadToMessages, generateResponseStreaming } from "./claude";
+import { convertThreadToMessages, generateResponse } from "./claude";
 import { addDocument, removeDocument, listDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 
@@ -236,30 +236,17 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       ];
     }
 
-    // Post a "thinking" message that we'll update with streaming response
+    // Post a "thinking" message
     const thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
 
     if (!thinkingTs) {
       throw new Error("Failed to post thinking message");
     }
 
-    // Generate response with streaming
-    let currentText = "";
-    let lastUpdateTime = 0;
-    const UPDATE_INTERVAL_MS = 1000; // Update Slack at most every 1 second
+    // Generate response
+    const result = await generateResponse(messages, env);
 
-    const result = await generateResponseStreaming(messages, env, async (chunk) => {
-      currentText += chunk;
-      const now = Date.now();
-
-      // Rate limit updates to avoid Slack API limits
-      if (now - lastUpdateTime >= UPDATE_INTERVAL_MS) {
-        await updateMessage(channel, thinkingTs, currentText + " ✨", env);
-        lastUpdateTime = now;
-      }
-    });
-
-    // Final update with complete response (remove thinking indicator)
+    // Update with final response
     await updateMessage(channel, thinkingTs, result.text, env);
 
     // Add feedback reactions to the response
