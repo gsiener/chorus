@@ -4,6 +4,28 @@ import { convertThreadToMessages, generateResponse } from "./claude";
 import { addDocument, removeDocument, listDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 
+// Rate limiting for doc commands (per user, per minute)
+const DOC_COMMAND_RATE_LIMIT = 10;
+const RATE_LIMIT_WINDOW_MS = 60000;
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+function isRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(userId);
+
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+
+  if (entry.count >= DOC_COMMAND_RATE_LIMIT) {
+    return true;
+  }
+
+  entry.count++;
+  return false;
+}
+
 /**
  * Parse doc commands from message text
  * Returns null if not a doc command
@@ -35,7 +57,8 @@ function parseDocCommand(
   return null;
 }
 
-export default {
+// Export handler for testing
+export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
@@ -72,6 +95,9 @@ export default {
     return new Response("OK", { status: 200 });
   },
 };
+
+// Default export for Cloudflare Workers
+export default handler;
 
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
   const { event } = payload;
@@ -113,6 +139,17 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const docCommand = parseDocCommand(text, botUserId);
 
     if (docCommand) {
+      // Rate limit doc commands (except list)
+      if (docCommand.type !== "list" && isRateLimited(user)) {
+        await postMessage(
+          channel,
+          "You're adding documents too quickly. Please wait a minute before trying again.",
+          threadTs,
+          env
+        );
+        return;
+      }
+
       let response: string;
 
       if (docCommand.type === "list") {
@@ -162,11 +199,15 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   }
 }
 
-// Cache the bot user ID
+// Cache the bot user ID with TTL (1 hour)
+const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000;
 let cachedBotUserId: string | null = null;
+let botUserIdCacheExpiry = 0;
 
 async function getBotUserId(env: Env): Promise<string> {
-  if (cachedBotUserId) {
+  const now = Date.now();
+
+  if (cachedBotUserId && now < botUserIdCacheExpiry) {
     return cachedBotUserId;
   }
 
@@ -180,8 +221,15 @@ async function getBotUserId(env: Env): Promise<string> {
 
   if (data.ok && data.user_id) {
     cachedBotUserId = data.user_id;
+    botUserIdCacheExpiry = now + BOT_ID_CACHE_TTL_MS;
     return data.user_id;
   }
 
   throw new Error("Failed to get bot user ID");
+}
+
+// For testing - reset the cached bot user ID
+export function resetBotUserIdCache(): void {
+  cachedBotUserId = null;
+  botUserIdCacheExpiry = 0;
 }

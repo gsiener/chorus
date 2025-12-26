@@ -10,6 +10,11 @@ import type { Env } from "./types";
 const DOCS_INDEX_KEY = "docs:index";
 const DOCS_PREFIX = "docs:content:";
 
+// Limits
+const MAX_DOC_SIZE = 50000; // 50KB per document
+const MAX_TOTAL_KB_SIZE = 200000; // 200KB total knowledge base
+const MAX_TITLE_LENGTH = 100;
+
 export interface DocMetadata {
   title: string;
   addedBy: string;
@@ -19,6 +24,33 @@ export interface DocMetadata {
 
 export interface DocsIndex {
   documents: DocMetadata[];
+}
+
+/**
+ * Sanitize a document title for use as a KV key
+ * - Removes dangerous characters
+ * - Limits length
+ * - Normalizes whitespace
+ */
+function sanitizeTitle(title: string): string {
+  return title
+    .slice(0, MAX_TITLE_LENGTH)
+    .replace(/[^\w\s-]/g, '') // Remove special characters except hyphen
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Collapse multiple hyphens
+    .replace(/^-|-$/g, '') // Remove leading/trailing hyphens
+    .toLowerCase();
+}
+
+/**
+ * Generate a safe KV key from a title
+ */
+function titleToKey(title: string): string {
+  const sanitized = sanitizeTitle(title);
+  if (!sanitized) {
+    throw new Error('Invalid title: results in empty key after sanitization');
+  }
+  return DOCS_PREFIX + sanitized;
 }
 
 /**
@@ -48,7 +80,33 @@ export async function addDocument(
   content: string,
   addedBy: string
 ): Promise<{ success: boolean; message: string }> {
+  // Validate title
+  if (!title || title.trim().length === 0) {
+    return { success: false, message: 'Title cannot be empty.' };
+  }
+
+  if (title.length > MAX_TITLE_LENGTH) {
+    return { success: false, message: `Title too long (max ${MAX_TITLE_LENGTH} chars).` };
+  }
+
+  // Validate content size
+  if (content.length > MAX_DOC_SIZE) {
+    return {
+      success: false,
+      message: `Document too large (${content.length} chars). Max size is ${MAX_DOC_SIZE} chars.`,
+    };
+  }
+
   const index = await getIndex(env);
+
+  // Check total knowledge base size
+  const currentTotal = index.documents.reduce((sum, d) => sum + d.charCount, 0);
+  if (currentTotal + content.length > MAX_TOTAL_KB_SIZE) {
+    return {
+      success: false,
+      message: `Knowledge base full. Current: ${currentTotal} chars, limit: ${MAX_TOTAL_KB_SIZE} chars. Remove some documents first.`,
+    };
+  }
 
   // Check if doc with this title already exists
   const existing = index.documents.find(
@@ -61,8 +119,8 @@ export async function addDocument(
     };
   }
 
-  // Store the content
-  const key = DOCS_PREFIX + title.toLowerCase().replace(/\s+/g, "-");
+  // Store the content with sanitized key
+  const key = titleToKey(title);
   await env.DOCS_KV.put(key, content);
 
   // Update the index
@@ -100,12 +158,13 @@ export async function removeDocument(
     };
   }
 
-  // Remove from KV
-  const key = DOCS_PREFIX + title.toLowerCase().replace(/\s+/g, "-");
+  // Remove from KV using the original title from index (for correct key generation)
+  const removed = index.documents[docIndex];
+  const key = titleToKey(removed.title);
   await env.DOCS_KV.delete(key);
 
   // Update index
-  const removed = index.documents.splice(docIndex, 1)[0];
+  index.documents.splice(docIndex, 1);
   await saveIndex(env, index);
 
   return {
@@ -134,6 +193,7 @@ export async function listDocuments(env: Env): Promise<string> {
 
 /**
  * Get all documents combined as knowledge base for Claude
+ * Uses parallel KV reads for better performance
  */
 export async function getKnowledgeBase(env: Env): Promise<string | null> {
   const index = await getIndex(env);
@@ -142,14 +202,21 @@ export async function getKnowledgeBase(env: Env): Promise<string | null> {
     return null;
   }
 
-  const docs: string[] = [];
-
-  for (const meta of index.documents) {
-    const key = DOCS_PREFIX + meta.title.toLowerCase().replace(/\s+/g, "-");
+  // Batch read all documents in parallel (fixes N+1 query issue)
+  const contentPromises = index.documents.map(async (meta) => {
+    const key = titleToKey(meta.title);
     const content = await env.DOCS_KV.get(key);
-    if (content) {
-      docs.push(`## ${meta.title}\n\n${content}`);
-    }
+    return { title: meta.title, content };
+  });
+
+  const results = await Promise.all(contentPromises);
+
+  const docs = results
+    .filter((r) => r.content !== null)
+    .map((r) => `## ${r.title}\n\n${r.content}`);
+
+  if (docs.length === 0) {
+    return null;
   }
 
   return docs.join("\n\n---\n\n");

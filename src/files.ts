@@ -7,6 +7,10 @@
 
 import type { Env, SlackFile } from "./types";
 
+// File size limits
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB max file size
+const DOWNLOAD_TIMEOUT_MS = 10000; // 10 second timeout for downloads
+
 export interface ExtractedFile {
   filename: string;
   content: string;
@@ -14,55 +18,83 @@ export interface ExtractedFile {
 }
 
 /**
+ * Mask sensitive parts of URLs for safe logging
+ */
+function maskUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
+/**
  * Download a file from Slack using the bot token
  * Handles redirects by manually following them with auth headers
  */
 async function downloadSlackFile(file: SlackFile, env: Env): Promise<ArrayBuffer> {
+  // Check file size before downloading
+  if (file.size && file.size > MAX_FILE_SIZE) {
+    throw new Error(`File too large (${Math.round(file.size / 1024)}KB). Max size is ${MAX_FILE_SIZE / 1024}KB.`);
+  }
+
   let url = file.url_private_download || file.url_private;
-  console.log(`Fetching from URL: ${url}`);
+  console.log(`Fetching file: ${file.name} from ${maskUrl(url)}`);
 
   // Follow redirects manually to preserve auth header
   let response: Response;
   let redirectCount = 0;
   const maxRedirects = 5;
 
-  while (redirectCount < maxRedirects) {
-    response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-      },
-      redirect: 'manual', // Don't auto-follow redirects
-    });
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
-    console.log(`Response status: ${response.status}, content-type: ${response.headers.get('content-type')}`);
+  try {
+    while (redirectCount < maxRedirects) {
+      response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        },
+        redirect: 'manual',
+        signal: controller.signal,
+      });
 
-    // Handle redirects
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
-      if (!location) {
-        throw new Error(`Redirect without location header`);
+      console.log(`Response status: ${response.status}`);
+
+      // Handle redirects
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new Error(`Redirect without location header`);
+        }
+        console.log(`Following redirect`);
+        url = location;
+        redirectCount++;
+        continue;
       }
-      console.log(`Following redirect to: ${location}`);
-      url = location;
-      redirectCount++;
-      continue;
-    }
 
-    break;
+      break;
+    }
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!response!.ok) {
-    const text = await response!.text();
-    console.error(`Download failed: ${text.substring(0, 500)}`);
     throw new Error(`Failed to download file: ${response!.status}`);
   }
 
   const buffer = await response!.arrayBuffer();
 
+  // Validate downloaded size
+  if (buffer.byteLength > MAX_FILE_SIZE) {
+    throw new Error(`Downloaded file too large (${Math.round(buffer.byteLength / 1024)}KB). Max size is ${MAX_FILE_SIZE / 1024}KB.`);
+  }
+
   // Check if we got HTML instead of the file (auth redirect)
   const firstBytes = new Uint8Array(buffer.slice(0, 20));
   const header = String.fromCharCode(...firstBytes);
-  console.log(`File header: ${header}`);
 
   if (header.includes('<!DOCTYPE') || header.includes('<html')) {
     throw new Error('Got HTML instead of file - auth may have failed');

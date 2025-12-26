@@ -1,5 +1,57 @@
-import { trace } from "@opentelemetry/api";
 import type { Env, SlackMessage, SlackThreadResponse, SlackPostResponse } from "./types";
+
+// Retry configuration
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 500;
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch with retry and exponential backoff
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = MAX_RETRIES
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      // Retry on 429 (rate limit) or 5xx errors
+      if (response.status === 429 || response.status >= 500) {
+        const retryAfter = response.headers.get('retry-after');
+        const delay = retryAfter
+          ? parseInt(retryAfter) * 1000
+          : INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+
+        if (attempt < maxRetries - 1) {
+          console.log(`Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+          await sleep(delay);
+          continue;
+        }
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < maxRetries - 1) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.log(`Fetch error, retrying after ${delay}ms: ${lastError.message}`);
+        await sleep(delay);
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Fetch failed after retries');
+}
 
 export async function verifySlackSignature(
   request: Request,
@@ -13,9 +65,9 @@ export async function verifySlackSignature(
     return false;
   }
 
-  // Check timestamp is within 5 minutes to prevent replay attacks
+  // Check timestamp is within 5 seconds to prevent replay attacks (Slack recommendation)
   const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - parseInt(timestamp)) > 300) {
+  if (Math.abs(now - parseInt(timestamp)) > 5) {
     return false;
   }
 
@@ -42,37 +94,24 @@ export async function fetchThreadMessages(
   threadTs: string,
   env: Env
 ): Promise<SlackMessage[]> {
-  const tracer = trace.getTracer("chorus");
-  return tracer.startActiveSpan("fetchThreadMessages", async (span) => {
-    span.setAttributes({
-      "slack.api.method": "conversations.replies",
-      "slack.channel": channel,
-      "slack.thread_ts": threadTs,
-    });
-
-    const response = await fetch(
-      `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
-      {
-        headers: {
-          Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-        },
-      }
-    );
-
-    const data = (await response.json()) as SlackThreadResponse;
-    span.setAttribute("slack.api.ok", data.ok);
-
-    if (!data.ok || !data.messages) {
-      console.error("Failed to fetch thread:", data.error);
-      span.setStatus({ code: 2, message: data.error ?? "Unknown error" });
-      span.end();
-      return [];
+  const response = await fetchWithRetry(
+    `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
+    {
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+      },
     }
+  );
 
-    span.setAttribute("slack.message_count", data.messages.length);
-    span.end();
-    return data.messages;
-  });
+  const data = (await response.json()) as SlackThreadResponse;
+
+  if (!data.ok || !data.messages) {
+    console.error("Failed to fetch thread:", data.error);
+    return [];
+  }
+
+  // Sort by timestamp to ensure chronological order
+  return data.messages.sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
 }
 
 export async function postMessage(
@@ -81,16 +120,9 @@ export async function postMessage(
   threadTs: string | undefined,
   env: Env
 ): Promise<boolean> {
-  const tracer = trace.getTracer("chorus");
-  return tracer.startActiveSpan("postMessage", async (span) => {
-    span.setAttributes({
-      "slack.api.method": "chat.postMessage",
-      "slack.channel": channel,
-      "slack.thread_ts": threadTs ?? "",
-      "message.length": text.length,
-    });
-
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
+  const response = await fetchWithRetry(
+    "https://slack.com/api/chat.postMessage",
+    {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
@@ -101,19 +133,15 @@ export async function postMessage(
         text,
         thread_ts: threadTs,
       }),
-    });
-
-    const data = (await response.json()) as SlackPostResponse;
-    span.setAttribute("slack.api.ok", data.ok);
-
-    if (!data.ok) {
-      console.error("Failed to post message:", data.error);
-      span.setStatus({ code: 2, message: data.error ?? "Unknown error" });
-      span.end();
-      return false;
     }
+  );
 
-    span.end();
-    return true;
-  });
+  const data = (await response.json()) as SlackPostResponse;
+
+  if (!data.ok) {
+    console.error("Failed to post message:", data.error);
+    return false;
+  }
+
+  return true;
 }

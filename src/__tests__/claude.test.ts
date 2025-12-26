@@ -111,9 +111,11 @@ describe("generateResponse", () => {
   });
 
   it("throws error on API failure", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response("Rate limited", { status: 429 })
-    );
+    // Mock all retries to return 429
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response("Rate limited", { status: 429 }))
+      .mockResolvedValueOnce(new Response("Rate limited", { status: 429 }))
+      .mockResolvedValueOnce(new Response("Rate limited", { status: 429 }));
 
     const messages = [{ role: "user" as const, content: "What is the roadmap?" }];
 

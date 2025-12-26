@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handler } from "../handler";
+import { handler, resetBotUserIdCache } from "../index";
 import type { Env } from "../types";
 
 describe("Worker", () => {

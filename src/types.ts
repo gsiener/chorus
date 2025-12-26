@@ -25,6 +25,7 @@ export interface SlackFile {
   name: string;
   mimetype: string;
   filetype: string;
+  size?: number;
   url_private: string;
   url_private_download?: string;
 }

@@ -1,6 +1,13 @@
-import { trace } from "@opentelemetry/api";
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
+
+// Retry configuration
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 const SYSTEM_PROMPT = `You are Chorus, an internal assistant helping the team with product roadmap, strategy, and company knowledge.
 
@@ -75,52 +82,63 @@ export async function generateResponse(
   messages: ClaudeMessage[],
   env: Env
 ): Promise<string> {
-  const tracer = trace.getTracer("chorus");
-  return tracer.startActiveSpan("generateResponse", async (span) => {
-    // Load knowledge base from KV
-    const knowledgeBase = await getKnowledgeBase(env);
-    const systemPrompt = knowledgeBase
-      ? `${SYSTEM_PROMPT}\n\n## Reference Documents\n\n${knowledgeBase}`
-      : SYSTEM_PROMPT;
+  // Load knowledge base from KV
+  const knowledgeBase = await getKnowledgeBase(env);
+  const systemPrompt = knowledgeBase
+    ? `${SYSTEM_PROMPT}\n\n## Reference Documents\n\n${knowledgeBase}`
+    : SYSTEM_PROMPT;
 
-    span.setAttributes({
-      "claude.model": CLAUDE_MODEL,
-      "claude.max_tokens": CLAUDE_MAX_TOKENS,
-      "claude.message_count": messages.length,
-      "claude.has_knowledge_base": !!knowledgeBase,
-      "claude.system_prompt_length": systemPrompt.length,
-    });
+  let lastError: Error | null = null;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: CLAUDE_MAX_TOKENS,
-        system: systemPrompt,
-        messages,
-      }),
-    });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: CLAUDE_MAX_TOKENS,
+          system: systemPrompt,
+          messages,
+        }),
+      });
 
-    span.setAttribute("http.status_code", response.status);
+      // Retry on rate limit or server errors
+      if (response.status === 429 || response.status >= 500) {
+        const retryAfter = response.headers.get('retry-after');
+        const delay = retryAfter
+          ? parseInt(retryAfter) * 1000
+          : INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Claude API error:", error);
-      span.setStatus({ code: 2, message: `Claude API error: ${response.status}` });
-      span.end();
-      throw new Error(`Claude API error: ${response.status}`);
+        if (attempt < MAX_RETRIES - 1) {
+          console.log(`Claude API ${response.status}, retrying after ${delay}ms`);
+          await sleep(delay);
+          continue;
+        }
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error("Claude API error:", error);
+        throw new Error(`Claude API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as ClaudeResponse;
+      const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
+      return convertToSlackFormat(rawText);
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < MAX_RETRIES - 1 && !(error instanceof Error && error.message.includes('Claude API error'))) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.log(`Claude fetch error, retrying after ${delay}ms: ${lastError.message}`);
+        await sleep(delay);
+      }
     }
+  }
 
-    const data = (await response.json()) as ClaudeResponse;
-    const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
-    const text = convertToSlackFormat(rawText);
-    span.setAttribute("claude.response_length", text.length);
-    span.end();
-    return text;
-  });
+  throw lastError ?? new Error('Claude API failed after retries');
 }
