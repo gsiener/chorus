@@ -66,4 +66,8 @@ export interface ClaudeMessage {
 
 export interface ClaudeResponse {
   content: Array<{ type: "text"; text: string }>;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  };
 }

@@ -1,6 +1,6 @@
 import type { Env, SlackPayload, SlackEventCallback } from "./types";
-import { verifySlackSignature, fetchThreadMessages, postMessage } from "./slack";
-import { convertThreadToMessages, generateResponse } from "./claude";
+import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
+import { convertThreadToMessages, generateResponseStreaming } from "./claude";
 import { addDocument, removeDocument, listDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 
@@ -8,6 +8,10 @@ import { extractFileContent, titleFromFilename } from "./files";
 const DOC_COMMAND_RATE_LIMIT = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+// Event deduplication (prevent duplicate responses from Slack retries)
+const EVENT_DEDUP_TTL_MS = 60000; // 1 minute
+const processedEvents = new Map<string, number>();
 
 function isRateLimited(userId: string): boolean {
   const now = Date.now();
@@ -25,6 +29,43 @@ function isRateLimited(userId: string): boolean {
   entry.count++;
   return false;
 }
+
+/**
+ * Check if an event has already been processed (deduplication)
+ */
+function isDuplicateEvent(eventId: string): boolean {
+  const now = Date.now();
+
+  // Clean up old entries
+  for (const [id, timestamp] of processedEvents) {
+    if (now - timestamp > EVENT_DEDUP_TTL_MS) {
+      processedEvents.delete(id);
+    }
+  }
+
+  if (processedEvents.has(eventId)) {
+    console.log(`Duplicate event detected: ${eventId}`);
+    return true;
+  }
+
+  processedEvents.set(eventId, now);
+  return false;
+}
+
+const HELP_TEXT = `*Chorus* — your internal assistant for product, roadmap, and strategy.
+
+*Commands:*
+• \`@Chorus help\` — show this message
+• \`@Chorus docs\` — list knowledge base documents
+• \`@Chorus add doc "Title": content\` — add a document
+• \`@Chorus remove doc "Title"\` — remove a document
+
+*Tips:*
+• Upload text files to add them to the knowledge base
+• Ask me anything about product strategy, roadmap, or priorities
+• I'll use the knowledge base to give you accurate answers
+
+👍 or 👎 my responses to help me improve!`;
 
 /**
  * Parse doc commands from message text
@@ -85,6 +126,11 @@ export const handler = {
     if (payload.type === "event_callback") {
       const event = payload.event;
 
+      // Deduplicate events (Slack may retry)
+      if (isDuplicateEvent(payload.event_id)) {
+        return new Response("OK", { status: 200 });
+      }
+
       if (event.type === "app_mention") {
         // Acknowledge immediately, process in background
         ctx.waitUntil(handleMention(payload, env));
@@ -106,6 +152,13 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   try {
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
+    const cleanedText = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
+
+    // Handle help command
+    if (/^help$/i.test(cleanedText)) {
+      await postMessage(channel, HELP_TEXT, threadTs, env);
+      return;
+    }
 
     // Handle file uploads - add them as docs
     if (files && files.length > 0) {
@@ -178,16 +231,43 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       messages = [
         {
           role: "user" as const,
-          content: text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim(),
+          content: cleanedText,
         },
       ];
     }
 
-    // Generate response with Claude
-    const response = await generateResponse(messages, env);
+    // Post a "thinking" message that we'll update with streaming response
+    const thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
 
-    // Post response to Slack
-    await postMessage(channel, response, threadTs, env);
+    if (!thinkingTs) {
+      throw new Error("Failed to post thinking message");
+    }
+
+    // Generate response with streaming
+    let currentText = "";
+    let lastUpdateTime = 0;
+    const UPDATE_INTERVAL_MS = 1000; // Update Slack at most every 1 second
+
+    const result = await generateResponseStreaming(messages, env, async (chunk) => {
+      currentText += chunk;
+      const now = Date.now();
+
+      // Rate limit updates to avoid Slack API limits
+      if (now - lastUpdateTime >= UPDATE_INTERVAL_MS) {
+        await updateMessage(channel, thinkingTs, currentText + " ✨", env);
+        lastUpdateTime = now;
+      }
+    });
+
+    // Final update with complete response (remove thinking indicator)
+    await updateMessage(channel, thinkingTs, result.text, env);
+
+    // Add feedback reactions to the response
+    await addReaction(channel, thinkingTs, "thumbsup", env);
+    await addReaction(channel, thinkingTs, "thumbsdown", env);
+
+    // Log metrics
+    console.log(`Response complete: cached=${result.cached}, tokens=${result.inputTokens + result.outputTokens}`);
   } catch (error) {
     console.error("Error handling mention:", error);
     await postMessage(

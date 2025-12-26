@@ -119,7 +119,7 @@ export async function postMessage(
   text: string,
   threadTs: string | undefined,
   env: Env
-): Promise<boolean> {
+): Promise<string | null> {
   const response = await fetchWithRetry(
     "https://slack.com/api/chat.postMessage",
     {
@@ -140,6 +140,76 @@ export async function postMessage(
 
   if (!data.ok) {
     console.error("Failed to post message:", data.error);
+    return null;
+  }
+
+  return data.ts ?? null;
+}
+
+/**
+ * Update an existing message
+ */
+export async function updateMessage(
+  channel: string,
+  ts: string,
+  text: string,
+  env: Env
+): Promise<boolean> {
+  const response = await fetchWithRetry(
+    "https://slack.com/api/chat.update",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel,
+        ts,
+        text,
+      }),
+    }
+  );
+
+  const data = (await response.json()) as SlackPostResponse;
+
+  if (!data.ok) {
+    console.error("Failed to update message:", data.error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Add a reaction to a message
+ */
+export async function addReaction(
+  channel: string,
+  ts: string,
+  emoji: string,
+  env: Env
+): Promise<boolean> {
+  const response = await fetch(
+    "https://slack.com/api/reactions.add",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channel,
+        timestamp: ts,
+        name: emoji,
+      }),
+    }
+  );
+
+  const data = (await response.json()) as { ok: boolean; error?: string };
+
+  if (!data.ok && data.error !== "already_reacted") {
+    console.error("Failed to add reaction:", data.error);
     return false;
   }
 

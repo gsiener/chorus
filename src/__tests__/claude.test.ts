@@ -90,13 +90,17 @@ describe("generateResponse", () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({
         content: [{ type: "text", text: "Here is the roadmap information..." }],
+        usage: { input_tokens: 100, output_tokens: 50 },
       }))
     );
 
     const messages = [{ role: "user" as const, content: "What is the roadmap?" }];
     const result = await generateResponse(messages, mockEnv);
 
-    expect(result).toBe("Here is the roadmap information...");
+    expect(result.text).toBe("Here is the roadmap information...");
+    expect(result.inputTokens).toBe(100);
+    expect(result.outputTokens).toBe(50);
+    expect(result.cached).toBe(false);
     expect(fetch).toHaveBeenCalledWith(
       "https://api.anthropic.com/v1/messages",
       expect.objectContaining({
@@ -127,9 +131,9 @@ describe("generateResponse", () => {
       new Response(JSON.stringify({ content: [] }))
     );
 
-    const messages = [{ role: "user" as const, content: "What is the roadmap?" }];
+    const messages = [{ role: "user" as const, content: "What is the roadmap? fallback test" }];
     const result = await generateResponse(messages, mockEnv);
 
-    expect(result).toBe("Sorry, I couldn't generate a response.");
+    expect(result.text).toBe("Sorry, I couldn't generate a response.");
   });
 });

@@ -163,14 +163,14 @@ describe("postMessage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("returns true on success", async () => {
+  it("returns message ts on success", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true, ts: "1234.5678" }))
     );
 
     const result = await postMessage("C123", "Hello world", "1234.0000", mockEnv);
 
-    expect(result).toBe(true);
+    expect(result).toBe("1234.5678");
     expect(fetch).toHaveBeenCalledWith(
       "https://slack.com/api/chat.postMessage",
       {
@@ -188,13 +188,13 @@ describe("postMessage", () => {
     );
   });
 
-  it("returns false on API error", async () => {
+  it("returns null on API error", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, error: "channel_not_found" }))
     );
 
     const result = await postMessage("C123", "Hello world", undefined, mockEnv);
 
-    expect(result).toBe(false);
+    expect(result).toBeNull();
   });
 });
