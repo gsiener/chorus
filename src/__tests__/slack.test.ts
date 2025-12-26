@@ -101,6 +101,7 @@ describe("fetchThreadMessages", () => {
     SLACK_SIGNING_SECRET: "test-secret",
     ANTHROPIC_API_KEY: "test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
   };
 
   beforeEach(() => {
@@ -151,6 +152,7 @@ describe("postMessage", () => {
     SLACK_SIGNING_SECRET: "test-secret",
     ANTHROPIC_API_KEY: "test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
   };
 
   beforeEach(() => {

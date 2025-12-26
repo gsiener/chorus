@@ -1,5 +1,6 @@
 import { trace } from "@opentelemetry/api";
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
+import { getKnowledgeBase } from "./docs";
 
 const SYSTEM_PROMPT = `You are Chorus, an internal assistant helping the team with product roadmap, strategy, and company knowledge.
 
@@ -7,12 +8,16 @@ Voice:
 - Warm and collegial — like a thoughtful teammate, not a corporate FAQ
 - Direct but graceful — say what you mean without being blunt or apologetic
 - Authentic — no corporate speak, no forced enthusiasm, no cringe
-- Use "I" naturally — you're part of the team, not a faceless system
+- Always use "I" naturally — you're part of the team, not a faceless system
 
 Style:
 - Keep it concise — this is Slack, not a memo
 - Light emoji use when it fits naturally 👍 — don't force it
 - Slack formatting (bold, bullets) only when it genuinely helps
+
+Greetings:
+- When someone says hi, respond warmly using "I" and mention you can help with product/roadmap/strategy
+- Example: "Hey! I'm here to help with product and roadmap questions — what's on your mind?"
 
 When you don't know:
 - Be honest and direct: "I don't have that context" not "I apologize, I'm unable to..."
@@ -51,10 +56,18 @@ export async function generateResponse(
 ): Promise<string> {
   const tracer = trace.getTracer("chorus");
   return tracer.startActiveSpan("generateResponse", async (span) => {
+    // Load knowledge base from KV
+    const knowledgeBase = await getKnowledgeBase(env);
+    const systemPrompt = knowledgeBase
+      ? `${SYSTEM_PROMPT}\n\n## Reference Documents\n\n${knowledgeBase}`
+      : SYSTEM_PROMPT;
+
     span.setAttributes({
       "claude.model": CLAUDE_MODEL,
       "claude.max_tokens": CLAUDE_MAX_TOKENS,
       "claude.message_count": messages.length,
+      "claude.has_knowledge_base": !!knowledgeBase,
+      "claude.system_prompt_length": systemPrompt.length,
     });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -67,7 +80,7 @@ export async function generateResponse(
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: CLAUDE_MAX_TOKENS,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages,
       }),
     });

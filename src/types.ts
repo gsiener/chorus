@@ -3,6 +3,7 @@ export interface Env {
   SLACK_SIGNING_SECRET: string;
   ANTHROPIC_API_KEY: string;
   HONEYCOMB_API_KEY: string;
+  DOCS_KV: KVNamespace;
 }
 
 export interface SlackUrlVerification {
@@ -19,6 +20,15 @@ export interface SlackEventCallback {
 
 export type SlackPayload = SlackUrlVerification | SlackEventCallback;
 
+export interface SlackFile {
+  id: string;
+  name: string;
+  mimetype: string;
+  filetype: string;
+  url_private: string;
+  url_private_download?: string;
+}
+
 export interface SlackEvent {
   type: string;
   user: string;
@@ -26,6 +36,7 @@ export interface SlackEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  files?: SlackFile[];
 }
 
 export interface SlackMessage {

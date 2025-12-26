@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+# KV namespace for knowledge base documents
+[[kv_namespaces]]
+binding = "DOCS_KV"
+id = "bf1f6f46baef45abb76000eaa432814f"
+
 # Secrets (set via `wrangler secret put`):
 # - SLACK_BOT_TOKEN
 # - SLACK_SIGNING_SECRET
