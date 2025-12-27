@@ -17,5 +17,8 @@
     "vitest": "3.2.x",
     "wrangler": "^4.56.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
+    "@opentelemetry/api": "^1.9.0"
+  }
 }
