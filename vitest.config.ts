@@ -4,7 +4,8 @@ export default defineWorkersConfig({
   test: {
     poolOptions: {
       workers: {
-        wrangler: { configPath: "./wrangler.toml" },
+        // Use test config that excludes Vectorize/AI bindings (require remote mode)
+        wrangler: { configPath: "./wrangler.test.toml" },
       },
     },
   },

@@ -1,0 +1,13 @@
+# Test configuration - excludes bindings that require remote mode
+name = "chorus"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace for knowledge base documents (mocked in tests)
+[[kv_namespaces]]
+binding = "DOCS_KV"
+id = "test-kv-id"
+
+# Note: VECTORIZE and AI bindings are mocked in test files
+# They're excluded here because they require remote mode which needs auth
