@@ -208,4 +208,97 @@ describe("Claude Response Quality (LLM-as-Judge)", () => {
     },
     30000
   );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "gently nudges about missing PRD when discussing initiative with gaps",
+    async () => {
+      const systemPromptWithNudge = `${SYSTEM_PROMPT}
+
+## Active Initiatives
+
+- Mobile App Launch (active): Launch mobile app for iOS and Android | Gaps: missing PRD, no metrics defined
+
+## Gentle Reminder
+
+Note: The "Mobile App Launch" initiative is missing PRD and success metrics. If relevant, gently suggest adding them — but only mention this once and don't be preachy.`;
+
+      const question = "What's the status of the Mobile App Launch initiative?";
+      const response = await callClaude(
+        [{ role: "user", content: question }],
+        systemPromptWithNudge
+      );
+
+      const result = await judgeResponse(question, response, [
+        "Discusses the Mobile App Launch initiative status",
+        "Mentions missing PRD or metrics naturally (not forced)",
+        "Tone is helpful, NOT preachy or lecturing",
+        "Nudge is brief (one sentence max), not the focus of the response",
+        "Response remains useful even without the nudge",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "does NOT nudge when initiative has complete info",
+    async () => {
+      const systemPromptComplete = `${SYSTEM_PROMPT}
+
+## Active Initiatives
+
+- Mobile App Launch (active): Launch mobile app for iOS and Android | Metrics: DAU +20%, App Store rating 4.5+ | PRD: https://docs.google.com/123`;
+
+      const question = "Tell me about the Mobile App Launch";
+      const response = await callClaude(
+        [{ role: "user", content: question }],
+        systemPromptComplete
+      );
+
+      const result = await judgeResponse(question, response, [
+        "Discusses the initiative without suggesting anything is missing",
+        "Does NOT mention needing to add PRD or metrics",
+        "Tone is confident and informative",
+        "May reference the existing metrics or PRD positively",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "incorporates knowledge base context naturally",
+    async () => {
+      const systemPromptWithKB = `${SYSTEM_PROMPT}
+
+## Relevant Knowledge Base Excerpts
+
+### Product Strategy 2026 (85% match)
+Our focus for 2026 is AI-native features, with three pillars: intelligent alerting, automated root cause analysis, and predictive insights. We're targeting 40% ARR growth.`;
+
+      const question = "What's our product direction for next year?";
+      const response = await callClaude(
+        [{ role: "user", content: question }],
+        systemPromptWithKB
+      );
+
+      const result = await judgeResponse(question, response, [
+        "References AI-native features or the three pillars",
+        "Information is presented as company knowledge, not as 'according to the document'",
+        "Response feels natural, not like reading from a script",
+        "Stays concise despite having detailed context",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
 });

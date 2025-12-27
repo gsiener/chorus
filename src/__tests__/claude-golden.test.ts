@@ -76,6 +76,15 @@ const GOLDEN_TESTS: GoldenTest[] = [
     forbiddenKeywords: ["January", "February", "March", "Q1", "Q2", "2024", "2025"],
     minSimilarity: 50,
   },
+  {
+    name: "initiative with gaps - gentle nudge",
+    input: "How's the Dashboard Redesign going?",
+    golden:
+      "The Dashboard Redesign is in active development. The team is focused on the new visualization components. Quick note: we should add success metrics and a PRD link when you get a chance. Anything specific you want to know?",
+    requiredKeywords: ["dashboard"],
+    forbiddenKeywords: ["you must", "you need to", "it is critical", "required"],
+    minSimilarity: 40,
+  },
 ];
 
 /**
