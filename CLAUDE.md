@@ -4,10 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Task Tracking
 
-We use **Linear** to track tasks. When starting work on a task:
+We use **Linear** to track tasks:
+
+**Starting a task:**
 1. Move the Linear issue to "In Progress"
 2. Reference the issue ID (e.g., PDD-28) in commits
-3. Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
+
+**Finishing a task:**
+1. Commit and push changes
+2. Move issue to "In Review"
+3. Verify/confirm the fix works
+4. If confirmed → move to "Done"
+5. If can't confirm → leave in "In Review" for manual verification
+
+**Creating issues:**
+- Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
 
 ## Project Overview
 
