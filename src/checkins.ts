@@ -15,8 +15,9 @@ const INITIATIVES_INDEX_KEY = "initiatives:index";
 const INITIATIVES_PREFIX = "initiatives:detail:";
 const LAST_CHECKIN_PREFIX = "checkin:last:";
 
-// Only send check-ins once per week (avoid spam on re-deploys)
-const MIN_CHECKIN_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days
+// Rate limiting intervals
+const MIN_CHECKIN_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days (production)
+const TEST_CHECKIN_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20 hours (allows daily in test mode)
 
 interface InitiativeWithDetails extends InitiativeMetadata {
   description?: string;
@@ -73,7 +74,8 @@ async function shouldSendCheckin(userId: string, env: Env): Promise<boolean> {
   }
 
   const lastTime = parseInt(lastCheckin, 10);
-  return Date.now() - lastTime > MIN_CHECKIN_INTERVAL_MS;
+  const interval = env.TEST_CHECKIN_USER ? TEST_CHECKIN_INTERVAL_MS : MIN_CHECKIN_INTERVAL_MS;
+  return Date.now() - lastTime > interval;
 }
 
 /**
@@ -150,7 +152,8 @@ function formatCheckinMessage(initiatives: InitiativeWithDetails[]): string {
 }
 
 /**
- * Send weekly check-in DMs to all initiative owners
+ * Send check-in DMs to initiative owners
+ * When TEST_CHECKIN_USER is set, only sends to that user (for testing)
  */
 export async function sendWeeklyCheckins(
   env: Env
@@ -159,7 +162,18 @@ export async function sendWeeklyCheckins(
     const byOwner = await getInitiativesByOwner(env);
     let sentCount = 0;
 
+    // In test mode, only send to the test user
+    const testUser = env.TEST_CHECKIN_USER;
+    if (testUser) {
+      console.log(`Test mode: only sending check-ins to ${testUser}`);
+    }
+
     for (const [ownerId, initiatives] of byOwner) {
+      // In test mode, skip anyone who isn't the test user
+      if (testUser && ownerId !== testUser) {
+        continue;
+      }
+
       // Skip if we recently sent a check-in
       if (!(await shouldSendCheckin(ownerId, env))) {
         console.log(`Skipping check-in for ${ownerId} (recently sent)`);

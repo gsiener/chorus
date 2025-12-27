@@ -5,6 +5,7 @@ export interface Env {
   HONEYCOMB_API_KEY: string;
   LINEAR_API_KEY?: string;
   DOCS_API_KEY?: string;
+  TEST_CHECKIN_USER?: string; // When set, only send check-ins to this user (for testing)
   DOCS_KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;
