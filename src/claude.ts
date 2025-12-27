@@ -1,18 +1,11 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
 import { getInitiativesContext } from "./initiatives";
-
-// Retry configuration
-const MAX_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 1000;
+import { fetchWithRetry } from "./http-utils";
 
 // Cache configuration
 const CACHE_PREFIX = "cache:response:";
 const CACHE_TTL_SECONDS = 3600; // 1 hour
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 /**
  * Generate a cache key from messages
@@ -121,71 +114,46 @@ export async function generateResponse(
     systemPrompt += `\n\n${knowledgeContext}`;
   }
 
-  let lastError: Error | null = null;
+  const response = await fetchWithRetry(
+    "https://api.anthropic.com/v1/messages",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: CLAUDE_MAX_TOKENS,
+        system: systemPrompt,
+        messages,
+      }),
+    },
+    { initialDelayMs: 1000 }
+  );
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL,
-          max_tokens: CLAUDE_MAX_TOKENS,
-          system: systemPrompt,
-          messages,
-        }),
-      });
-
-      // Retry on rate limit or server errors
-      if (response.status === 429 || response.status >= 500) {
-        const retryAfter = response.headers.get('retry-after');
-        const delay = retryAfter
-          ? parseInt(retryAfter) * 1000
-          : INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
-
-        if (attempt < MAX_RETRIES - 1) {
-          console.log(`Claude API ${response.status}, retrying after ${delay}ms`);
-          await sleep(delay);
-          continue;
-        }
-      }
-
-      if (!response.ok) {
-        const error = await response.text();
-        console.error("Claude API error:", error);
-        throw new Error(`Claude API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as ClaudeResponse;
-      const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
-      const text = convertToSlackFormat(rawText);
-
-      // Extract token usage
-      const inputTokens = data.usage?.input_tokens ?? 0;
-      const outputTokens = data.usage?.output_tokens ?? 0;
-
-      // Log token usage for observability
-      console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
-
-      // Cache the response
-      await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
-
-      return { text, inputTokens, outputTokens, cached: false };
-    } catch (error) {
-      lastError = error as Error;
-      if (attempt < MAX_RETRIES - 1 && !(error instanceof Error && error.message.includes('Claude API error'))) {
-        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
-        console.log(`Claude fetch error, retrying after ${delay}ms: ${lastError.message}`);
-        await sleep(delay);
-      }
-    }
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("Claude API error:", error);
+    throw new Error(`Claude API error: ${response.status}`);
   }
 
-  throw lastError ?? new Error('Claude API failed after retries');
+  const data = (await response.json()) as ClaudeResponse;
+  const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
+  const text = convertToSlackFormat(rawText);
+
+  // Extract token usage
+  const inputTokens = data.usage?.input_tokens ?? 0;
+  const outputTokens = data.usage?.output_tokens ?? 0;
+
+  // Log token usage for observability
+  console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
+
+  // Cache the response
+  await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
+
+  return { text, inputTokens, outputTokens, cached: false };
 }
 
 /**

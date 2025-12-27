@@ -17,49 +17,57 @@ import {
 
 // Rate limiting for doc commands (per user, per minute)
 const DOC_COMMAND_RATE_LIMIT = 10;
-const RATE_LIMIT_WINDOW_MS = 60000;
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_SECONDS = 60;
+const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
 
 // Event deduplication (prevent duplicate responses from Slack retries)
-const EVENT_DEDUP_TTL_MS = 60000; // 1 minute
-const processedEvents = new Map<string, number>();
+const EVENT_DEDUP_TTL_SECONDS = 60; // 1 minute
+const EVENT_DEDUP_KEY_PREFIX = "event:";
 
-function isRateLimited(userId: string): boolean {
+/**
+ * Check if user is rate limited (using KV for global state across workers)
+ */
+async function isRateLimited(userId: string, env: Env): Promise<boolean> {
+  const key = `${RATE_LIMIT_KEY_PREFIX}${userId}`;
   const now = Date.now();
-  const entry = rateLimitMap.get(userId);
 
-  if (!entry || now > entry.resetTime) {
-    rateLimitMap.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+  const stored = await env.DOCS_KV.get<{ count: number; resetTime: number }>(key, "json");
+
+  if (!stored || now > stored.resetTime) {
+    // Start new window
+    await env.DOCS_KV.put(key, JSON.stringify({ count: 1, resetTime: now + RATE_LIMIT_WINDOW_SECONDS * 1000 }), {
+      expirationTtl: RATE_LIMIT_WINDOW_SECONDS,
+    });
     return false;
   }
 
-  if (entry.count >= DOC_COMMAND_RATE_LIMIT) {
+  if (stored.count >= DOC_COMMAND_RATE_LIMIT) {
     return true;
   }
 
-  entry.count++;
+  // Increment count
+  await env.DOCS_KV.put(key, JSON.stringify({ count: stored.count + 1, resetTime: stored.resetTime }), {
+    expirationTtl: Math.ceil((stored.resetTime - now) / 1000),
+  });
   return false;
 }
 
 /**
- * Check if an event has already been processed (deduplication)
+ * Check if an event has already been processed (deduplication using KV)
+ * Returns true if duplicate, false if new event
  */
-function isDuplicateEvent(eventId: string): boolean {
-  const now = Date.now();
+async function isDuplicateEvent(eventId: string, env: Env): Promise<boolean> {
+  const key = `${EVENT_DEDUP_KEY_PREFIX}${eventId}`;
 
-  // Clean up old entries
-  for (const [id, timestamp] of processedEvents) {
-    if (now - timestamp > EVENT_DEDUP_TTL_MS) {
-      processedEvents.delete(id);
-    }
-  }
+  const existing = await env.DOCS_KV.get(key);
 
-  if (processedEvents.has(eventId)) {
+  if (existing) {
     console.log(`Duplicate event detected: ${eventId}`);
     return true;
   }
 
-  processedEvents.set(eventId, now);
+  // Mark as processed with TTL
+  await env.DOCS_KV.put(key, "1", { expirationTtl: EVENT_DEDUP_TTL_SECONDS });
   return false;
 }
 
@@ -271,7 +279,7 @@ export const handler = {
       const event = payload.event;
 
       // Deduplicate events (Slack may retry)
-      if (isDuplicateEvent(payload.event_id)) {
+      if (await isDuplicateEvent(payload.event_id, env)) {
         return new Response("OK", { status: 200 });
       }
 
@@ -412,7 +420,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
     if (docCommand) {
       // Rate limit doc commands (except list)
-      if (docCommand.type !== "list" && isRateLimited(user)) {
+      if (docCommand.type !== "list" && await isRateLimited(user, env)) {
         await postMessage(
           channel,
           "You're adding documents too quickly. Please wait a minute before trying again.",

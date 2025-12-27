@@ -1,57 +1,5 @@
 import type { Env, SlackMessage, SlackThreadResponse, SlackPostResponse } from "./types";
-
-// Retry configuration
-const MAX_RETRIES = 3;
-const INITIAL_RETRY_DELAY_MS = 500;
-
-/**
- * Sleep for a given number of milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Fetch with retry and exponential backoff
- */
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  maxRetries = MAX_RETRIES
-): Promise<Response> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await fetch(url, options);
-
-      // Retry on 429 (rate limit) or 5xx errors
-      if (response.status === 429 || response.status >= 500) {
-        const retryAfter = response.headers.get('retry-after');
-        const delay = retryAfter
-          ? parseInt(retryAfter) * 1000
-          : INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
-
-        if (attempt < maxRetries - 1) {
-          console.log(`Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-          await sleep(delay);
-          continue;
-        }
-      }
-
-      return response;
-    } catch (error) {
-      lastError = error as Error;
-      if (attempt < maxRetries - 1) {
-        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
-        console.log(`Fetch error, retrying after ${delay}ms: ${lastError.message}`);
-        await sleep(delay);
-      }
-    }
-  }
-
-  throw lastError ?? new Error('Fetch failed after retries');
-}
+import { fetchWithRetry } from "./http-utils";
 
 export async function verifySlackSignature(
   request: Request,
