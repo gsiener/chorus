@@ -63,18 +63,26 @@ function isDuplicateEvent(eventId: string): boolean {
   return false;
 }
 
-const HELP_TEXT = `*Chorus* — your internal assistant for product, roadmap, and strategy.
+const HELP_TEXT = `*Chorus* — your chief of staff for product leadership.
 
-*Commands:*
-• \`@Chorus help\` — show this message
-• \`@Chorus docs\` — list knowledge base documents
-• \`@Chorus add doc "Title": content\` — add a document
-• \`@Chorus remove doc "Title"\` — remove a document
+*Initiatives:*
+• \`@Chorus initiatives\` — list all initiatives
+• \`@Chorus initiative add "Name" - owner @user - description: text\`
+• \`@Chorus initiative "Name" show\` — view details
+• \`@Chorus initiative "Name" update status [proposed|active|paused|completed|cancelled]\`
+• \`@Chorus initiative "Name" update prd [url]\`
+• \`@Chorus initiative "Name" add metric: [gtm|product] [name] - target: [target]\`
+• \`@Chorus initiative "Name" remove\`
+
+*Knowledge Base:*
+• \`@Chorus docs\` — list documents
+• \`@Chorus add doc "Title": content\`
+• \`@Chorus remove doc "Title"\`
+• Upload files to add them as docs
 
 *Tips:*
-• Upload text files to add them to the knowledge base
-• Ask me anything about product strategy, roadmap, or priorities
-• I'll use the knowledge base to give you accurate answers
+• Ask me about product strategy, roadmap, or initiatives
+• I'll gently remind you about missing PRDs or metrics
 
 👍 or 👎 my responses to help me improve!`;
 
