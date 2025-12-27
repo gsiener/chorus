@@ -23,9 +23,9 @@ binding = "AI"
 # - ANTHROPIC_API_KEY
 # - HONEYCOMB_API_KEY
 
-# Cron trigger for DM check-ins (daily 9am UTC / 1am PST while testing)
+# Cron trigger for DM check-ins (daily 9am ET / 14:00 UTC)
 [triggers]
-crons = ["0 9 * * *"]
+crons = ["0 14 * * *"]
 
 # Native OpenTelemetry export to Honeycomb
 # Destinations configured in Cloudflare Dashboard:
