@@ -1,5 +1,6 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
+import { getInitiativesContext } from "./initiatives";
 
 // Retry configuration
 const MAX_RETRIES = 3;
@@ -33,7 +34,7 @@ export interface GenerateResponseResult {
   cached: boolean;
 }
 
-const SYSTEM_PROMPT = `You are Chorus, an internal assistant for product roadmap, strategy, and company knowledge.
+const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership, helping track initiatives, strategy, and priorities.
 
 Voice: Warm, collegial, direct. Use "I" naturally. No corporate speak.
 
@@ -43,9 +44,14 @@ Style:
 - Slack formatting: *bold*, _italic_, \`code\`, bullets with • or -
 - NO markdown headers or [links](url) — use <url|text>
 
+When discussing initiatives:
+- Reference their status, owner, and expected outcomes when relevant
+- If an initiative is missing a PRD or metrics, mention it once gently (don't be preachy)
+- Help connect questions to specific initiatives when appropriate
+
 When you don't know: Say so directly, suggest who might help.
 
-Boundaries: Stay focused on product/roadmap/strategy. Redirect off-topic warmly.`;
+Boundaries: Stay focused on product/roadmap/strategy/initiatives. Redirect off-topic warmly.`;
 
 export function convertThreadToMessages(
   messages: SlackMessage[],
@@ -94,11 +100,19 @@ export async function generateResponse(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Load knowledge base from KV
-  const knowledgeBase = await getKnowledgeBase(env);
-  const systemPrompt = knowledgeBase
-    ? `${SYSTEM_PROMPT}\n\n## Reference Documents\n\n${knowledgeBase}`
-    : SYSTEM_PROMPT;
+  // Load knowledge base and initiatives context from KV
+  const [knowledgeBase, initiativesContext] = await Promise.all([
+    getKnowledgeBase(env),
+    getInitiativesContext(env),
+  ]);
+
+  let systemPrompt = SYSTEM_PROMPT;
+  if (initiativesContext) {
+    systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
+  }
+  if (knowledgeBase) {
+    systemPrompt += `\n\n## Reference Documents\n\n${knowledgeBase}`;
+  }
 
   let lastError: Error | null = null;
 
@@ -184,11 +198,19 @@ export async function generateResponseStreaming(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Load knowledge base from KV
-  const knowledgeBase = await getKnowledgeBase(env);
-  const systemPrompt = knowledgeBase
-    ? `${SYSTEM_PROMPT}\n\n## Reference Documents\n\n${knowledgeBase}`
-    : SYSTEM_PROMPT;
+  // Load knowledge base and initiatives context from KV
+  const [knowledgeBase, initiativesContext] = await Promise.all([
+    getKnowledgeBase(env),
+    getInitiativesContext(env),
+  ]);
+
+  let systemPrompt = SYSTEM_PROMPT;
+  if (initiativesContext) {
+    systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
+  }
+  if (knowledgeBase) {
+    systemPrompt += `\n\n## Reference Documents\n\n${knowledgeBase}`;
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
