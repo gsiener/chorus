@@ -1,7 +1,7 @@
 name = "chorus"
 main = "src/index.ts"
 compatibility_date = "2025-11-17"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "nodejs_als", "enable_workers_observability_tracing"]
 
 # KV namespace for knowledge base documents
 [[kv_namespaces]]
