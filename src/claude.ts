@@ -1,5 +1,5 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
-import { getKnowledgeBase } from "./docs";
+import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
 import { getInitiativesContext } from "./initiatives";
 
 // Retry configuration
@@ -100,18 +100,25 @@ export async function generateResponse(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Load knowledge base and initiatives context from KV
-  const [knowledgeBase, initiativesContext] = await Promise.all([
-    getKnowledgeBase(env),
+  // Extract query from the last user message for semantic search
+  const lastUserMessage = messages.filter(m => m.role === "user").pop();
+  const query = lastUserMessage?.content || "";
+
+  // Load initiatives context and search knowledge base in parallel
+  const [searchResults, initiativesContext] = await Promise.all([
+    query ? searchDocuments(query, env, 5) : Promise.resolve([]),
     getInitiativesContext(env),
   ]);
+
+  // Format search results for context
+  const knowledgeContext = formatSearchResultsForContext(searchResults);
 
   let systemPrompt = SYSTEM_PROMPT;
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
-  if (knowledgeBase) {
-    systemPrompt += `\n\n## Reference Documents\n\n${knowledgeBase}`;
+  if (knowledgeContext) {
+    systemPrompt += `\n\n${knowledgeContext}`;
   }
 
   let lastError: Error | null = null;
@@ -198,18 +205,25 @@ export async function generateResponseStreaming(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Load knowledge base and initiatives context from KV
-  const [knowledgeBase, initiativesContext] = await Promise.all([
-    getKnowledgeBase(env),
+  // Extract query from the last user message for semantic search
+  const lastUserMessage = messages.filter(m => m.role === "user").pop();
+  const query = lastUserMessage?.content || "";
+
+  // Load initiatives context and search knowledge base in parallel
+  const [searchResults, initiativesContext] = await Promise.all([
+    query ? searchDocuments(query, env, 5) : Promise.resolve([]),
     getInitiativesContext(env),
   ]);
+
+  // Format search results for context
+  const knowledgeContext = formatSearchResultsForContext(searchResults);
 
   let systemPrompt = SYSTEM_PROMPT;
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
-  if (knowledgeBase) {
-    systemPrompt += `\n\n## Reference Documents\n\n${knowledgeBase}`;
+  if (knowledgeContext) {
+    systemPrompt += `\n\n${knowledgeContext}`;
   }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
