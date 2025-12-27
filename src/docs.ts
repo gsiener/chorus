@@ -6,6 +6,7 @@
  */
 
 import type { Env } from "./types";
+import { indexDocument, removeDocumentFromIndex } from "./embeddings";
 
 const DOCS_INDEX_KEY = "docs:index";
 const DOCS_PREFIX = "docs:content:";
@@ -132,9 +133,22 @@ export async function addDocument(
   });
   await saveIndex(env, index);
 
+  // Index for semantic search (non-blocking)
+  let indexMessage = "";
+  try {
+    const indexResult = await indexDocument(title, content, env);
+    if (indexResult.success) {
+      indexMessage = ` Indexed in ${indexResult.chunksIndexed} chunk${indexResult.chunksIndexed === 1 ? "" : "s"} for semantic search.`;
+    } else {
+      console.error(`Failed to index document: ${indexResult.message}`);
+    }
+  } catch (error) {
+    console.error("Error indexing document:", error);
+  }
+
   return {
     success: true,
-    message: `Added "${title}" (${content.length} chars) to the knowledge base.`,
+    message: `Added "${title}" (${content.length} chars) to the knowledge base.${indexMessage}`,
   };
 }
 
@@ -166,6 +180,13 @@ export async function removeDocument(
   // Update index
   index.documents.splice(docIndex, 1);
   await saveIndex(env, index);
+
+  // Remove from vector index (non-blocking)
+  try {
+    await removeDocumentFromIndex(removed.title, env);
+  } catch (error) {
+    console.error("Error removing document from vector index:", error);
+  }
 
   return {
     success: true,
