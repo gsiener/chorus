@@ -26,17 +26,10 @@ binding = "AI"
 # Native OpenTelemetry export to Honeycomb
 # Destinations configured in Cloudflare Dashboard:
 #   Workers & Pages → chorus → Settings → Observability → Destinations
-[observability]
+[observability.traces]
+enabled = true
+destinations = ["honeycomb-traces"]
 
 [observability.logs]
 enabled = true
 destinations = ["honeycomb-logs"]
-head_sampling_rate = 1
-persist = true
-invocation_logs = true
-
-[observability.traces]
-enabled = true
-destinations = ["honeycomb-traces"]
-head_sampling_rate = 1
-persist = true

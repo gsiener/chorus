@@ -14,8 +14,6 @@ import {
   formatInitiative,
   formatInitiativeList,
 } from "./initiatives";
-import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
-import { trace } from "@opentelemetry/api";
 
 // Rate limiting for doc commands (per user, per minute)
 const DOC_COMMAND_RATE_LIMIT = 10;
@@ -255,10 +253,7 @@ function parseInitiativeCommand(
 // Export handler for testing
 export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const span = trace.getActiveSpan();
-
     if (request.method !== "POST") {
-      span?.setAttribute("http.status_code", 405);
       return new Response("Method not allowed", { status: 405 });
     }
 
@@ -267,13 +262,10 @@ export const handler = {
     // Verify Slack signature
     const isValid = await verifySlackSignature(request, body, env.SLACK_SIGNING_SECRET);
     if (!isValid) {
-      span?.setAttribute("http.status_code", 401);
-      span?.setAttribute("error", true);
       return new Response("Invalid signature", { status: 401 });
     }
 
     const payload = JSON.parse(body) as SlackPayload;
-    span?.setAttribute("slack.event_type", payload.type);
 
     // Handle URL verification (Slack app setup)
     if (payload.type === "url_verification") {
@@ -285,11 +277,9 @@ export const handler = {
     // Handle event callbacks
     if (payload.type === "event_callback") {
       const event = payload.event;
-      span?.setAttribute("slack.event_subtype", event.type);
 
       // Deduplicate events (Slack may retry)
       if (await isDuplicateEvent(payload.event_id, env)) {
-        span?.setAttribute("slack.duplicate", true);
         return new Response("OK", { status: 200 });
       }
 
@@ -310,39 +300,21 @@ export const handler = {
   },
 };
 
-// OpenTelemetry configuration for Honeycomb export
-const otelConfig: ResolveConfigFn = (env: Env) => ({
-  exporter: {
-    url: "https://api.honeycomb.io/v1/traces",
-    headers: { "x-honeycomb-team": env.HONEYCOMB_API_KEY },
-  },
-  service: { name: "chorus" },
-});
-
-// Default export with OTel instrumentation
-export default instrument(handler, otelConfig);
+// Default export for Cloudflare Workers
+export default handler;
 
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
-  const tracer = trace.getTracer("chorus");
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
-
-  const mentionSpan = tracer.startSpan("handle_mention");
-  mentionSpan.setAttribute("slack.channel", channel);
-  mentionSpan.setAttribute("slack.user", user);
-  mentionSpan.setAttribute("slack.has_files", !!(files && files.length > 0));
 
   try {
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
     const cleanedText = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
-    mentionSpan.setAttribute("message.length", cleanedText.length);
 
     // Handle help command
     if (/^help$/i.test(cleanedText)) {
-      mentionSpan.setAttribute("command", "help");
       await postMessage(channel, HELP_TEXT, threadTs, env);
-      mentionSpan.end();
       return;
     }
 
@@ -371,9 +343,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       }
 
       await postMessage(channel, results.join("\n"), threadTs, env);
-      mentionSpan.setAttribute("command", "file_upload");
-      mentionSpan.setAttribute("files.count", files.length);
-      mentionSpan.end();
       return;
     }
 
@@ -449,8 +418,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       }
 
       await postMessage(channel, response, threadTs, env);
-      mentionSpan.setAttribute("command", `initiative_${initCommand.type}`);
-      mentionSpan.end();
       return;
     }
 
@@ -466,8 +433,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
           threadTs,
           env
         );
-        mentionSpan.setAttribute("rate_limited", true);
-        mentionSpan.end();
         return;
       }
 
@@ -489,13 +454,10 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       }
 
       await postMessage(channel, response, threadTs, env);
-      mentionSpan.setAttribute("command", `doc_${docCommand.type}`);
-      mentionSpan.end();
       return;
     }
 
     // Regular message - route to Claude
-    mentionSpan.setAttribute("command", "chat");
     let messages;
 
     if (thread_ts) {
@@ -520,13 +482,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     }
 
     // Generate response
-    const claudeSpan = tracer.startSpan("claude_generate");
     const result = await generateResponse(messages, env);
-    claudeSpan.setAttribute("claude.cached", result.cached);
-    claudeSpan.setAttribute("claude.input_tokens", result.inputTokens);
-    claudeSpan.setAttribute("claude.output_tokens", result.outputTokens);
-    claudeSpan.setAttribute("claude.total_tokens", result.inputTokens + result.outputTokens);
-    claudeSpan.end();
 
     // Update with final response
     await updateMessage(channel, thinkingTs, result.text, env);
@@ -536,14 +492,8 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     await addReaction(channel, thinkingTs, "thumbsdown", env);
 
     // Log metrics
-    mentionSpan.setAttribute("response.cached", result.cached);
-    mentionSpan.setAttribute("response.tokens", result.inputTokens + result.outputTokens);
     console.log(`Response complete: cached=${result.cached}, tokens=${result.inputTokens + result.outputTokens}`);
-    mentionSpan.end();
   } catch (error) {
-    mentionSpan.setAttribute("error", true);
-    mentionSpan.setAttribute("error.message", error instanceof Error ? error.message : String(error));
-    mentionSpan.end();
     console.error("Error handling mention:", error);
     await postMessage(
       channel,
