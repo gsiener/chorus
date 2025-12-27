@@ -3,6 +3,7 @@ export interface Env {
   SLACK_SIGNING_SECRET: string;
   ANTHROPIC_API_KEY: string;
   HONEYCOMB_API_KEY: string;
+  LINEAR_API_KEY?: string;
   DOCS_KV: KVNamespace;
 }
 
@@ -70,4 +71,52 @@ export interface ClaudeResponse {
     input_tokens: number;
     output_tokens: number;
   };
+}
+
+// Initiative tracking types
+
+export type InitiativeStatusValue = "proposed" | "active" | "paused" | "completed" | "cancelled";
+
+export interface InitiativeStatus {
+  value: InitiativeStatusValue;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface ExpectedMetric {
+  type: "gtm" | "product";
+  name: string;       // e.g., "DAU", "Revenue", "Retention"
+  target: string;     // e.g., "Increase by 10%", "$500K ARR"
+}
+
+export interface Initiative {
+  id: string;
+  name: string;
+  description: string;
+  owner: string;              // Slack user ID
+  status: InitiativeStatus;
+  expectedMetrics: ExpectedMetric[];
+  prdLink?: string;           // Google Docs URL
+  linearProjectId?: string;   // For Linear sync
+  strategyDocRef?: string;    // Reference to a doc in knowledge base
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  lastDiscussedAt?: string;   // For nudge detection
+  tags?: string[];            // Freeform categorization
+}
+
+export interface InitiativeMetadata {
+  id: string;
+  name: string;
+  owner: string;
+  status: InitiativeStatusValue;
+  hasMetrics: boolean;
+  hasPrd: boolean;
+  updatedAt: string;
+}
+
+export interface InitiativeIndex {
+  initiatives: InitiativeMetadata[];
+  lastSyncedWithLinear?: string;
 }
