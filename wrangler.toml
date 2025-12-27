@@ -24,16 +24,14 @@ binding = "AI"
 # - HONEYCOMB_API_KEY
 
 # Native OpenTelemetry export to Honeycomb
-# Note: Create "honeycomb" destination in Cloudflare Dashboard first:
-#   Workers & Pages → chorus → Observability → Destinations
-#   Endpoint: https://api.honeycomb.io/v1/traces
-#   Header: x-honeycomb-team: <your API key>
+# Destinations configured in Cloudflare Dashboard:
+#   Workers & Pages → chorus → Settings → Observability → Destinations
 [observability.traces]
 enabled = true
-destinations = ["honeycomb"]
+destinations = ["honeycomb-traces"]
 head_sampling_rate = 1.0
 
 [observability.logs]
 enabled = true
-destinations = ["honeycomb"]
+destinations = ["honeycomb-logs"]
 head_sampling_rate = 1.0
