@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { verifySlackSignature, fetchThreadMessages, postMessage } from "../slack";
+import {
+  verifySlackSignature,
+  fetchThreadMessages,
+  postMessage,
+  updateMessage,
+  addReaction,
+  postDirectMessage,
+} from "../slack";
 import type { Env } from "../types";
 
 describe("verifySlackSignature", () => {
@@ -198,6 +205,199 @@ describe("postMessage", () => {
     );
 
     const result = await postMessage("C123", "Hello world", undefined, mockEnv);
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("updateMessage", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("updates message successfully", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }))
+    );
+
+    const result = await updateMessage("C123", "1700000001.000000", "Updated text", mockEnv);
+
+    expect(result).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          channel: "C123",
+          ts: "1700000001.000000",
+          text: "Updated text",
+        }),
+      })
+    );
+  });
+
+  it("returns false on API error", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "message_not_found" }))
+    );
+
+    const result = await updateMessage("C123", "1700000001.000000", "Updated", mockEnv);
+
+    expect(result).toBe(false);
+  });
+});
+
+describe("addReaction", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("adds reaction successfully", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }))
+    );
+
+    const result = await addReaction("C123", "1700000001.000000", "thumbsup", mockEnv);
+
+    expect(result).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://slack.com/api/reactions.add",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          channel: "C123",
+          timestamp: "1700000001.000000",
+          name: "thumbsup",
+        }),
+      })
+    );
+  });
+
+  it("returns true when already reacted", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "already_reacted" }))
+    );
+
+    const result = await addReaction("C123", "1700000001.000000", "thumbsup", mockEnv);
+
+    expect(result).toBe(true);
+  });
+
+  it("returns false on other API errors", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "channel_not_found" }))
+    );
+
+    const result = await addReaction("C123", "1700000001.000000", "thumbsup", mockEnv);
+
+    expect(result).toBe(false);
+  });
+});
+
+describe("postDirectMessage", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("opens DM channel and posts message", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, channel: { id: "D123" } }))
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "1700000001.000000" }))
+      );
+
+    const result = await postDirectMessage("U456", "Hello via DM!", mockEnv);
+
+    expect(result).toBe("1700000001.000000");
+
+    // First call opens DM
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://slack.com/api/conversations.open",
+      expect.objectContaining({
+        body: JSON.stringify({ users: "U456" }),
+      })
+    );
+
+    // Second call posts message
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://slack.com/api/chat.postMessage",
+      expect.objectContaining({
+        body: JSON.stringify({
+          channel: "D123",
+          text: "Hello via DM!",
+          thread_ts: undefined,
+        }),
+      })
+    );
+  });
+
+  it("returns null when DM channel cannot be opened", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "user_not_found" }))
+    );
+
+    const result = await postDirectMessage("U456", "Hello!", mockEnv);
+
+    expect(result).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1); // Should not attempt to post
+  });
+
+  it("returns null when message post fails", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, channel: { id: "D123" } }))
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error: "rate_limited" }))
+      );
+
+    const result = await postDirectMessage("U456", "Hello!", mockEnv);
 
     expect(result).toBeNull();
   });

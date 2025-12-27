@@ -84,7 +84,10 @@ export interface ClaudeMessage {
 }
 
 export interface ClaudeResponse {
+  id: string;
+  model: string;
   content: Array<{ type: "text"; text: string }>;
+  stop_reason?: "end_turn" | "max_tokens" | "stop_sequence" | "tool_use";
   usage?: {
     input_tokens: number;
     output_tokens: number;

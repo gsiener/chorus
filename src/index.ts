@@ -19,6 +19,7 @@ import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
+import { recordCommand, recordError } from "./telemetry";
 
 // Rate limiting for doc commands (per user, per minute)
 const DOC_COMMAND_RATE_LIMIT = 10;
@@ -467,6 +468,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
     // Handle help command
     if (/^help$/i.test(cleanedText)) {
+      recordCommand("help");
       await postMessage(channel, HELP_TEXT, threadTs, env);
       return;
     }
@@ -474,6 +476,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     // Handle search command
     const searchCommand = parseSearchCommand(text, botUserId);
     if (searchCommand) {
+      recordCommand("search");
       const { query } = searchCommand;
 
       // Search both documents and initiatives in parallel
@@ -546,6 +549,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const initCommand = parseInitiativeCommand(text, botUserId);
 
     if (initCommand) {
+      recordCommand(`initiative:${initCommand.type}`);
       let response: string;
 
       switch (initCommand.type) {
@@ -628,6 +632,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const docCommand = parseDocCommand(text, botUserId);
 
     if (docCommand) {
+      recordCommand(`docs:${docCommand.type}`);
       // Rate limit doc commands (except list)
       if (docCommand.type !== "list" && await isRateLimited(user, env)) {
         await postMessage(
@@ -698,6 +703,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     console.log(`Response complete: cached=${result.cached}, tokens=${result.inputTokens + result.outputTokens}`);
   } catch (error) {
     console.error("Error handling mention:", error);
+    if (error instanceof Error) {
+      recordError(error, "handleMention");
+    }
     await postMessage(
       channel,
       "Sorry, I encountered an error processing your request.",

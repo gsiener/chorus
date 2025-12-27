@@ -2,6 +2,7 @@ import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
+import { recordGenAiMetrics } from "./telemetry";
 
 // Cache configuration
 const CACHE_PREFIX = "cache:response:";
@@ -151,8 +152,19 @@ export async function generateResponse(
   const inputTokens = data.usage?.input_tokens ?? 0;
   const outputTokens = data.usage?.output_tokens ?? 0;
 
-  // Log token usage for observability
+  // Record metrics for observability (OTel GenAI semantic conventions)
   console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
+  recordGenAiMetrics({
+    operationName: "chat",
+    requestModel: "claude-sonnet-4-20250514",
+    responseModel: data.model,
+    inputTokens,
+    outputTokens,
+    maxTokens: 1024,
+    responseId: data.id,
+    finishReasons: data.stop_reason ? [data.stop_reason] : undefined,
+    streaming: false,
+  });
 
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
@@ -273,8 +285,16 @@ export async function generateResponseStreaming(
 
   const text = convertToSlackFormat(fullText);
 
-  // Log token usage for observability
+  // Record metrics for observability (OTel GenAI semantic conventions)
   console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
+  recordGenAiMetrics({
+    operationName: "chat",
+    requestModel: "claude-sonnet-4-20250514",
+    inputTokens,
+    outputTokens,
+    maxTokens: 1024,
+    streaming: true,
+  });
 
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
