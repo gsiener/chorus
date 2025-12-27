@@ -14,6 +14,7 @@ import {
   formatInitiative,
   formatInitiativeList,
 } from "./initiatives";
+import { trace } from "@opentelemetry/api";
 
 // Rate limiting for doc commands (per user, per minute)
 const DOC_COMMAND_RATE_LIMIT = 10;
@@ -307,6 +308,12 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
+  // Add Slack context to the current trace span
+  const span = trace.getActiveSpan();
+  span?.setAttribute("slack.user_id", user);
+  span?.setAttribute("slack.channel", channel);
+  span?.setAttribute("slack.event_type", "app_mention");
+
   try {
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
@@ -511,6 +518,13 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 async function handleReaction(payload: SlackEventCallback, env: Env): Promise<void> {
   const event = payload.event as SlackReactionAddedEvent;
   const { reaction, user, item } = event;
+
+  // Add Slack context to the current trace span
+  const span = trace.getActiveSpan();
+  span?.setAttribute("slack.user_id", user);
+  span?.setAttribute("slack.channel", item.channel);
+  span?.setAttribute("slack.event_type", "reaction_added");
+  span?.setAttribute("slack.reaction", reaction);
 
   // Only track thumbsup/thumbsdown reactions
   if (reaction !== "+1" && reaction !== "-1" && reaction !== "thumbsup" && reaction !== "thumbsdown") {
