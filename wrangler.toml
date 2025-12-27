@@ -8,6 +8,15 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DOCS_KV"
 id = "bf1f6f46baef45abb76000eaa432814f"
 
+# Vectorize for semantic document search
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "chorus-docs"
+
+# Workers AI for generating embeddings
+[ai]
+binding = "AI"
+
 # Secrets (set via `wrangler secret put`):
 # - SLACK_BOT_TOKEN
 # - SLACK_SIGNING_SECRET

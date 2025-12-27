@@ -5,6 +5,8 @@ export interface Env {
   HONEYCOMB_API_KEY: string;
   LINEAR_API_KEY?: string;
   DOCS_KV: KVNamespace;
+  VECTORIZE: VectorizeIndex;
+  AI: Ai;
 }
 
 export interface SlackUrlVerification {

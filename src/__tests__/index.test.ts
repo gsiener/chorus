@@ -9,6 +9,8 @@ describe("Worker", () => {
     ANTHROPIC_API_KEY: "sk-ant-test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
     DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
   };
 
   const mockCtx = {

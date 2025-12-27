@@ -37,6 +37,8 @@ function createMockEnv(kv = createMockKV()): Env {
     ANTHROPIC_API_KEY: "test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
     DOCS_KV: kv as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
   };
 }
 
