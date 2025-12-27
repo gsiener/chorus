@@ -1,8 +1,19 @@
-import type { Env, SlackPayload, SlackEventCallback } from "./types";
+import type { Env, SlackPayload, SlackEventCallback, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse } from "./claude";
 import { addDocument, removeDocument, listDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
+import {
+  addInitiative,
+  getInitiative,
+  removeInitiative,
+  updateInitiativeStatus,
+  updateInitiativePrd,
+  addInitiativeMetric,
+  listInitiatives,
+  formatInitiative,
+  formatInitiativeList,
+} from "./initiatives";
 
 // Rate limiting for doc commands (per user, per minute)
 const DOC_COMMAND_RATE_LIMIT = 10;
@@ -98,6 +109,125 @@ function parseDocCommand(
   return null;
 }
 
+// Initiative command types
+type InitiativeCommand =
+  | { type: "list"; filters?: { owner?: string; status?: InitiativeStatusValue } }
+  | { type: "add"; name: string; owner: string; description: string }
+  | { type: "show"; name: string }
+  | { type: "update-status"; name: string; status: InitiativeStatusValue }
+  | { type: "update-prd"; name: string; prdLink: string }
+  | { type: "add-metric"; name: string; metric: ExpectedMetric }
+  | { type: "remove"; name: string };
+
+const VALID_STATUSES: InitiativeStatusValue[] = ["proposed", "active", "paused", "completed", "cancelled"];
+
+/**
+ * Parse initiative commands from message text
+ * Returns null if not an initiative command
+ */
+function parseInitiativeCommand(
+  text: string,
+  botUserId: string
+): InitiativeCommand | null {
+  const cleaned = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
+
+  // List initiatives: "initiatives" or "initiative list"
+  if (/^initiatives?$/i.test(cleaned) || /^initiatives?\s+list$/i.test(cleaned)) {
+    return { type: "list" };
+  }
+
+  // List with filters: "initiatives --mine" or "initiatives --status active"
+  const listFilterMatch = cleaned.match(/^initiatives?\s+list\s+(.+)$/i) ||
+    cleaned.match(/^initiatives?\s+(--\S+.*)$/i);
+  if (listFilterMatch) {
+    const filters: { owner?: string; status?: InitiativeStatusValue } = {};
+    const filterStr = listFilterMatch[1];
+
+    if (/--mine/i.test(filterStr)) {
+      // Will be filled in by caller with current user
+      filters.owner = "__CURRENT_USER__";
+    }
+
+    const statusMatch = filterStr.match(/--status\s+(\w+)/i);
+    if (statusMatch && VALID_STATUSES.includes(statusMatch[1].toLowerCase() as InitiativeStatusValue)) {
+      filters.status = statusMatch[1].toLowerCase() as InitiativeStatusValue;
+    }
+
+    return { type: "list", filters };
+  }
+
+  // Add initiative: initiative add "Name" - owner @user - description: text
+  const addMatch = cleaned.match(
+    /^initiative\s+add\s+"([^"]+)"\s*-\s*owner\s+<@(\w+)>\s*-\s*description:\s*(.+)$/is
+  );
+  if (addMatch) {
+    return {
+      type: "add",
+      name: addMatch[1],
+      owner: addMatch[2],
+      description: addMatch[3].trim(),
+    };
+  }
+
+  // Show initiative: initiative "Name" show OR initiative show "Name"
+  const showMatch = cleaned.match(/^initiative\s+"([^"]+)"\s+show$/i) ||
+    cleaned.match(/^initiative\s+show\s+"([^"]+)"$/i);
+  if (showMatch) {
+    return { type: "show", name: showMatch[1] };
+  }
+
+  // Update status: initiative "Name" update status [status]
+  const statusMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+update\s+status\s+(\w+)$/i
+  );
+  if (statusMatch) {
+    const status = statusMatch[2].toLowerCase();
+    if (VALID_STATUSES.includes(status as InitiativeStatusValue)) {
+      return {
+        type: "update-status",
+        name: statusMatch[1],
+        status: status as InitiativeStatusValue,
+      };
+    }
+  }
+
+  // Update PRD: initiative "Name" update prd [url]
+  const prdMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+update\s+prd\s+(.+)$/i
+  );
+  if (prdMatch) {
+    return {
+      type: "update-prd",
+      name: prdMatch[1],
+      prdLink: prdMatch[2].trim().replace(/^<|>$/g, ""), // Remove Slack URL formatting
+    };
+  }
+
+  // Add metric: initiative "Name" add metric: [gtm|product] [name] - target: [target]
+  const metricMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+add\s+metric:\s*(gtm|product)\s+(.+?)\s*-\s*target:\s*(.+)$/i
+  );
+  if (metricMatch) {
+    return {
+      type: "add-metric",
+      name: metricMatch[1],
+      metric: {
+        type: metricMatch[2].toLowerCase() as "gtm" | "product",
+        name: metricMatch[3].trim(),
+        target: metricMatch[4].trim(),
+      },
+    };
+  }
+
+  // Remove initiative: initiative "Name" remove
+  const removeMatch = cleaned.match(/^initiative\s+"([^"]+)"\s+remove$/i);
+  if (removeMatch) {
+    return { type: "remove", name: removeMatch[1] };
+  }
+
+  return null;
+}
+
 // Export handler for testing
 export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -185,6 +315,81 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       }
 
       await postMessage(channel, results.join("\n"), threadTs, env);
+      return;
+    }
+
+    // Check for initiative commands
+    const initCommand = parseInitiativeCommand(text, botUserId);
+
+    if (initCommand) {
+      let response: string;
+
+      switch (initCommand.type) {
+        case "list": {
+          const filters = initCommand.filters;
+          if (filters?.owner === "__CURRENT_USER__") {
+            filters.owner = user;
+          }
+          const initiatives = await listInitiatives(env, filters);
+          response = formatInitiativeList(initiatives);
+          break;
+        }
+        case "add": {
+          const result = await addInitiative(
+            env,
+            initCommand.name,
+            initCommand.description,
+            initCommand.owner,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "show": {
+          const initiative = await getInitiative(env, initCommand.name);
+          response = initiative
+            ? formatInitiative(initiative)
+            : `Initiative "${initCommand.name}" not found.`;
+          break;
+        }
+        case "update-status": {
+          const result = await updateInitiativeStatus(
+            env,
+            initCommand.name,
+            initCommand.status,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "update-prd": {
+          const result = await updateInitiativePrd(
+            env,
+            initCommand.name,
+            initCommand.prdLink,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "add-metric": {
+          const result = await addInitiativeMetric(
+            env,
+            initCommand.name,
+            initCommand.metric,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "remove": {
+          const result = await removeInitiative(env, initCommand.name);
+          response = result.message;
+          break;
+        }
+      }
+
+      await postMessage(channel, response, threadTs, env);
       return;
     }
 
