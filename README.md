@@ -74,6 +74,9 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 npx wrangler secret put HONEYCOMB_API_KEY
 # Paste your Honeycomb API key (for tracing)
+
+npx wrangler secret put DOCS_API_KEY
+# Create a secure API key for console-based document management
 ```
 
 ### 4. Configure Slack Event Subscriptions
@@ -170,6 +173,34 @@ Chorus includes OpenTelemetry tracing that exports to Honeycomb. Traces include:
 - Error tracking with exceptions
 
 To enable tracing, set the `HONEYCOMB_API_KEY` secret (see Setup). View traces in the [Honeycomb UI](https://ui.honeycomb.io/).
+
+## Knowledge Base API
+
+Add documents to the knowledge base from the console using the REST API:
+
+```bash
+# Set your API key
+export CHORUS_API_KEY="your-docs-api-key"
+export CHORUS_URL="https://chorus.your-subdomain.workers.dev"
+
+# Add a document
+curl -X POST "$CHORUS_URL/api/docs" \
+  -H "Authorization: Bearer $CHORUS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Q1 Strategy", "content": "Our Q1 priorities are..."}'
+
+# List documents
+curl "$CHORUS_URL/api/docs" \
+  -H "Authorization: Bearer $CHORUS_API_KEY"
+
+# Remove a document
+curl -X DELETE "$CHORUS_URL/api/docs" \
+  -H "Authorization: Bearer $CHORUS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Q1 Strategy"}'
+```
+
+Documents are automatically chunked and indexed for semantic search, so Chorus can find relevant context when answering questions.
 
 ## Customization
 

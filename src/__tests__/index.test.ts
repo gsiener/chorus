@@ -139,3 +139,164 @@ describe("Worker", () => {
     expect(mockCtx.waitUntil).not.toHaveBeenCalled();
   });
 });
+
+describe("Docs API", () => {
+  const mockKvStore: Record<string, string> = {};
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-signing-secret",
+    ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_API_KEY: "test-api-key",
+    DOCS_KV: {
+      get: vi.fn((key: string) => Promise.resolve(mockKvStore[key] || null)),
+      put: vi.fn((key: string, value: string) => {
+        mockKvStore[key] = value;
+        return Promise.resolve();
+      }),
+      delete: vi.fn((key: string) => {
+        delete mockKvStore[key];
+        return Promise.resolve();
+      }),
+    } as unknown as KVNamespace,
+    VECTORIZE: {
+      query: vi.fn().mockResolvedValue({ matches: [] }),
+      insert: vi.fn().mockResolvedValue(undefined),
+      deleteByIds: vi.fn().mockResolvedValue(undefined),
+    } as unknown as VectorizeIndex,
+    AI: {
+      run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2, 0.3]] }),
+    } as unknown as Ai,
+  };
+
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  beforeEach(() => {
+    // Clear mock KV store
+    Object.keys(mockKvStore).forEach((key) => delete mockKvStore[key]);
+    vi.clearAllMocks();
+  });
+
+  it("returns 401 without API key", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "GET",
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe("Unauthorized");
+  });
+
+  it("returns 401 with wrong API key", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "GET",
+      headers: { Authorization: "Bearer wrong-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("GET /api/docs returns document list", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "GET",
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { documents: string };
+    expect(body.documents).toBeDefined();
+  });
+
+  it("POST /api/docs adds a document", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-api-key",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "Test Doc", content: "Test content" }),
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; message: string };
+    expect(body.success).toBe(true);
+    expect(body.message).toContain("Test Doc");
+  });
+
+  it("POST /api/docs returns 400 for missing fields", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test-api-key",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "Test Doc" }), // missing content
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("Missing required fields");
+  });
+
+  it("DELETE /api/docs removes a document", async () => {
+    // First add a document
+    mockKvStore["docs:index"] = JSON.stringify({
+      documents: [{ title: "To Delete", addedBy: "api", addedAt: new Date().toISOString(), charCount: 10 }],
+    });
+    mockKvStore["docs:content:to-delete"] = "content";
+
+    const request = new Request("https://example.com/api/docs", {
+      method: "DELETE",
+      headers: {
+        Authorization: "Bearer test-api-key",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "To Delete" }),
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean };
+    expect(body.success).toBe(true);
+  });
+
+  it("DELETE /api/docs returns 404 for non-existent doc", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "DELETE",
+      headers: {
+        Authorization: "Bearer test-api-key",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "Non-existent" }),
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 405 for unsupported methods", async () => {
+    const request = new Request("https://example.com/api/docs", {
+      method: "PUT",
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(405);
+  });
+});

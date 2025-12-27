@@ -251,9 +251,109 @@ function parseInitiativeCommand(
   return null;
 }
 
+/**
+ * Verify API key from Authorization header
+ */
+function verifyApiKey(request: Request, env: Env): boolean {
+  const authHeader = request.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return false;
+  }
+  const token = authHeader.slice(7);
+  return token === env.DOCS_API_KEY;
+}
+
+/**
+ * Handle /api/docs requests for console-based document management
+ */
+async function handleDocsApi(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const method = request.method;
+
+  // GET /api/docs - list documents
+  if (method === "GET") {
+    const list = await listDocuments(env);
+    return new Response(JSON.stringify({ documents: list }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // POST /api/docs - add document
+  if (method === "POST") {
+    let body: { title?: string; content?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!body.title || !body.content) {
+      return new Response(JSON.stringify({ error: "Missing required fields: title, content" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const result = await addDocument(env, body.title, body.content, "api");
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // DELETE /api/docs - remove document
+  if (method === "DELETE") {
+    let body: { title?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!body.title) {
+      return new Response(JSON.stringify({ error: "Missing required field: title" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const result = await removeDocument(env, body.title);
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(JSON.stringify({ error: "Method not allowed" }), {
+    status: 405,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 // Export handler for testing
 export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Route /api/docs to the docs API handler
+    if (url.pathname === "/api/docs") {
+      return handleDocsApi(request, env);
+    }
+
+    // Slack webhook requires POST
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
     }

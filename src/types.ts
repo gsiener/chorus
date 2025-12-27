@@ -4,6 +4,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   HONEYCOMB_API_KEY: string;
   LINEAR_API_KEY?: string;
+  DOCS_API_KEY?: string;
   DOCS_KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;

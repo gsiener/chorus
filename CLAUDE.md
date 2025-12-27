@@ -62,3 +62,4 @@ Set via `npx wrangler secret put <NAME>`:
 - `SLACK_BOT_TOKEN` - Bot token for Slack API (`xoxb-...`)
 - `SLACK_SIGNING_SECRET` - For request verification
 - `ANTHROPIC_API_KEY` - Claude API key
+- `DOCS_API_KEY` - API key for console-based document management (REST API)
