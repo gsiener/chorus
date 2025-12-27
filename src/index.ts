@@ -1,7 +1,7 @@
 import type { Env, SlackPayload, SlackEventCallback, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse } from "./claude";
-import { addDocument, removeDocument, listDocuments } from "./docs";
+import { addDocument, removeDocument, listDocuments, backfillDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
   addInitiative,
@@ -78,6 +78,7 @@ const HELP_TEXT = `*Chorus* — your chief of staff for product leadership.
 • \`@Chorus docs\` — list documents
 • \`@Chorus add doc "Title": content\`
 • \`@Chorus remove doc "Title"\`
+• \`@Chorus backfill docs\` — reindex all documents for semantic search
 • Upload files to add them as docs
 
 *Tips:*
@@ -93,13 +94,18 @@ const HELP_TEXT = `*Chorus* — your chief of staff for product leadership.
 function parseDocCommand(
   text: string,
   botUserId: string
-): { type: "add"; title: string; content: string } | { type: "remove"; title: string } | { type: "list" } | null {
+): { type: "add"; title: string; content: string } | { type: "remove"; title: string } | { type: "list" } | { type: "backfill" } | null {
   // Remove bot mention and trim
   const cleaned = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
 
   // List docs: "docs" or "list docs"
   if (/^(list\s+)?docs$/i.test(cleaned)) {
     return { type: "list" };
+  }
+
+  // Backfill docs: "backfill docs"
+  if (/^backfill\s+docs$/i.test(cleaned)) {
+    return { type: "backfill" };
   }
 
   // Add doc: add doc "Title": content
@@ -422,6 +428,11 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
         response = await listDocuments(env);
       } else if (docCommand.type === "add") {
         const result = await addDocument(env, docCommand.title, docCommand.content, user);
+        response = result.message;
+      } else if (docCommand.type === "backfill") {
+        // Post initial message
+        await postMessage(channel, "Starting backfill of documents for semantic search...", threadTs, env);
+        const result = await backfillDocuments(env);
         response = result.message;
       } else {
         const result = await removeDocument(env, docCommand.title);

@@ -242,3 +242,60 @@ export async function getKnowledgeBase(env: Env): Promise<string | null> {
 
   return docs.join("\n\n---\n\n");
 }
+
+/**
+ * Backfill all existing documents into the vector index
+ * Used for migrating documents added before semantic search was enabled
+ */
+export async function backfillDocuments(
+  env: Env
+): Promise<{ success: boolean; message: string; indexed: number; failed: number }> {
+  const index = await getIndex(env);
+
+  if (index.documents.length === 0) {
+    return {
+      success: true,
+      message: "No documents to backfill.",
+      indexed: 0,
+      failed: 0,
+    };
+  }
+
+  let indexed = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const doc of index.documents) {
+    const key = titleToKey(doc.title);
+    const content = await env.DOCS_KV.get(key);
+
+    if (!content) {
+      errors.push(`${doc.title}: content not found`);
+      failed++;
+      continue;
+    }
+
+    try {
+      const result = await indexDocument(doc.title, content, env);
+      if (result.success) {
+        indexed++;
+      } else {
+        errors.push(`${doc.title}: ${result.message}`);
+        failed++;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      errors.push(`${doc.title}: ${msg}`);
+      failed++;
+    }
+  }
+
+  const message = `Backfill complete. Indexed: ${indexed}, Failed: ${failed}${errors.length > 0 ? `\n\nErrors:\n• ${errors.slice(0, 5).join("\n• ")}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ""}` : ""}`;
+
+  return {
+    success: failed === 0,
+    message,
+    indexed,
+    failed,
+  };
+}
