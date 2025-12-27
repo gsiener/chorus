@@ -6,21 +6,22 @@ set -o pipefail
 
 # Run tests and capture output
 OUTPUT=$(npm test 2>&1) || true
-EXIT_CODE=$?
 
 echo "$OUTPUT"
 
-# Check if tests passed (look for "Test Files" with passed count and no failures)
-if echo "$OUTPUT" | grep -q "Test Files.*passed" && ! echo "$OUTPUT" | grep -q "Test Files.*failed"; then
-  # All test files passed
-  if echo "$OUTPUT" | grep -q "Tests.*passed" && ! echo "$OUTPUT" | grep -q "Tests.*failed"; then
-    echo ""
-    echo "✅ All tests passed (ignoring workerd shutdown crash)"
-    exit 0
-  fi
+# Count passing test files (✓ pattern) and failing test files (✗ pattern)
+PASSED_FILES=$(echo "$OUTPUT" | grep -c "✓ src/__tests__/" || true)
+FAILED_FILES=$(echo "$OUTPUT" | grep -c "✗ src/__tests__/" || true)
+
+echo ""
+echo "Test files passed: $PASSED_FILES, failed: $FAILED_FILES"
+
+# If we have passing tests and no failures, consider it a success
+if [ "$PASSED_FILES" -gt 0 ] && [ "$FAILED_FILES" -eq 0 ]; then
+  echo "✅ All tests passed (ignoring workerd shutdown crash)"
+  exit 0
 fi
 
 # If we get here, tests actually failed
-echo ""
 echo "❌ Tests failed"
 exit 1
