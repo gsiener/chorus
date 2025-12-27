@@ -1,4 +1,4 @@
-import type { Env, SlackPayload, SlackEventCallback, InitiativeStatusValue, ExpectedMetric } from "./types";
+import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse } from "./claude";
 import { addDocument, removeDocument, listDocuments, backfillDocuments } from "./docs";
@@ -288,6 +288,12 @@ export const handler = {
         ctx.waitUntil(handleMention(payload, env));
         return new Response("OK", { status: 200 });
       }
+
+      if (event.type === "reaction_added") {
+        // Track feedback reactions in background
+        ctx.waitUntil(handleReaction(payload, env));
+        return new Response("OK", { status: 200 });
+      }
     }
 
     return new Response("OK", { status: 200 });
@@ -298,7 +304,7 @@ export const handler = {
 export default handler;
 
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
-  const { event } = payload;
+  const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
   try {
@@ -495,6 +501,45 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       thread_ts ?? ts,
       env
     );
+  }
+}
+
+/**
+ * Handle reaction_added events for feedback tracking (PDD-24)
+ * Logs thumbsup/thumbsdown reactions on bot messages to Honeycomb
+ */
+async function handleReaction(payload: SlackEventCallback, env: Env): Promise<void> {
+  const event = payload.event as SlackReactionAddedEvent;
+  const { reaction, user, item } = event;
+
+  // Only track thumbsup/thumbsdown reactions
+  if (reaction !== "+1" && reaction !== "-1" && reaction !== "thumbsup" && reaction !== "thumbsdown") {
+    return;
+  }
+
+  try {
+    const botUserId = await getBotUserId(env);
+
+    // Only track reactions on bot messages
+    if (event.item_user !== botUserId) {
+      return;
+    }
+
+    const feedback = reaction === "+1" || reaction === "thumbsup" ? "positive" : "negative";
+
+    // Log feedback for Honeycomb (via Workers observability)
+    console.log(JSON.stringify({
+      type: "feedback",
+      feedback,
+      reaction,
+      user,
+      channel: item.channel,
+      message_ts: item.ts,
+      timestamp: new Date().toISOString(),
+    }));
+
+  } catch (error) {
+    console.error("Error handling reaction:", error);
   }
 }
 

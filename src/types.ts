@@ -33,8 +33,8 @@ export interface SlackFile {
   url_private_download?: string;
 }
 
-export interface SlackEvent {
-  type: string;
+export interface SlackAppMentionEvent {
+  type: "app_mention";
   user: string;
   text: string;
   channel: string;
@@ -42,6 +42,21 @@ export interface SlackEvent {
   thread_ts?: string;
   files?: SlackFile[];
 }
+
+export interface SlackReactionAddedEvent {
+  type: "reaction_added";
+  user: string;
+  reaction: string;
+  item: {
+    type: "message";
+    channel: string;
+    ts: string;
+  };
+  item_user: string;
+  event_ts: string;
+}
+
+export type SlackEvent = SlackAppMentionEvent | SlackReactionAddedEvent;
 
 export interface SlackMessage {
   user: string;
