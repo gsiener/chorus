@@ -280,3 +280,26 @@ export function formatSearchResultsForContext(results: SearchResult[]): string |
 
   return `## Relevant Knowledge Base Excerpts\n\n${sections.join("\n\n---\n\n")}`;
 }
+
+/**
+ * Format search results for display to the user
+ */
+export function formatSearchResultsForUser(results: SearchResult[]): string {
+  if (results.length === 0) {
+    return "No matching documents found.";
+  }
+
+  const lines: string[] = [`*Knowledge Base Results* (${results.length} found)`];
+
+  for (const result of results) {
+    const scorePercent = Math.round(result.score * 100);
+    // Truncate content for display
+    const snippet = result.content.length > 150
+      ? result.content.slice(0, 150) + "..."
+      : result.content;
+    lines.push(`\n• *${result.title}* (${scorePercent}% match)`);
+    lines.push(`  _${snippet}_`);
+  }
+
+  return lines.join("\n");
+}

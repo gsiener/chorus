@@ -13,7 +13,11 @@ import {
   listInitiatives,
   formatInitiative,
   formatInitiativeList,
+  searchInitiatives,
 } from "./initiatives";
+import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
+import { syncLinearProjects } from "./linear";
+import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
 
 // Rate limiting for doc commands (per user, per minute)
@@ -74,8 +78,12 @@ async function isDuplicateEvent(eventId: string, env: Env): Promise<boolean> {
 
 const HELP_TEXT = `*Chorus* — your chief of staff for product leadership.
 
+*Search:*
+• \`@Chorus search "query"\` — search initiatives, docs, and PRDs
+
 *Initiatives:*
 • \`@Chorus initiatives\` — list all initiatives
+• \`@Chorus initiatives sync linear\` — import projects from Linear
 • \`@Chorus initiative add "Name" - owner @user - description: text\`
 • \`@Chorus initiative "Name" show\` — view details
 • \`@Chorus initiative "Name" update status [proposed|active|paused|completed|cancelled]\`
@@ -140,7 +148,8 @@ type InitiativeCommand =
   | { type: "update-status"; name: string; status: InitiativeStatusValue }
   | { type: "update-prd"; name: string; prdLink: string }
   | { type: "add-metric"; name: string; metric: ExpectedMetric }
-  | { type: "remove"; name: string };
+  | { type: "remove"; name: string }
+  | { type: "sync-linear" };
 
 const VALID_STATUSES: InitiativeStatusValue[] = ["proposed", "active", "paused", "completed", "cancelled"];
 
@@ -157,6 +166,11 @@ function parseInitiativeCommand(
   // List initiatives: "initiatives" or "initiative list"
   if (/^initiatives?$/i.test(cleaned) || /^initiatives?\s+list$/i.test(cleaned)) {
     return { type: "list" };
+  }
+
+  // Sync from Linear: "initiatives sync linear"
+  if (/^initiatives?\s+sync\s+linear$/i.test(cleaned)) {
+    return { type: "sync-linear" };
   }
 
   // List with filters: "initiatives --mine" or "initiatives --status active"
@@ -246,6 +260,30 @@ function parseInitiativeCommand(
   const removeMatch = cleaned.match(/^initiative\s+"([^"]+)"\s+remove$/i);
   if (removeMatch) {
     return { type: "remove", name: removeMatch[1] };
+  }
+
+  return null;
+}
+
+/**
+ * Parse search command from message text
+ * Returns null if not a search command
+ */
+function parseSearchCommand(
+  text: string,
+  botUserId: string
+): { query: string } | null {
+  const cleaned = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
+
+  // Match: search "query" or search query
+  const quotedMatch = cleaned.match(/^search\s+"([^"]+)"$/i);
+  if (quotedMatch) {
+    return { query: quotedMatch[1] };
+  }
+
+  const unquotedMatch = cleaned.match(/^search\s+(.+)$/i);
+  if (unquotedMatch) {
+    return { query: unquotedMatch[1].trim() };
   }
 
   return null;
@@ -345,6 +383,14 @@ async function handleDocsApi(request: Request, env: Env): Promise<Response> {
 
 // Export handler for testing
 export const handler = {
+  /**
+   * Handle scheduled cron triggers (weekly check-ins)
+   */
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log("Running scheduled check-ins at", new Date(event.scheduledTime).toISOString());
+    ctx.waitUntil(sendWeeklyCheckins(env));
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
@@ -422,6 +468,49 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     // Handle help command
     if (/^help$/i.test(cleanedText)) {
       await postMessage(channel, HELP_TEXT, threadTs, env);
+      return;
+    }
+
+    // Handle search command
+    const searchCommand = parseSearchCommand(text, botUserId);
+    if (searchCommand) {
+      const { query } = searchCommand;
+
+      // Search both documents and initiatives in parallel
+      const [docResults, initiativeResults] = await Promise.all([
+        searchDocuments(query, env, 5),
+        searchInitiatives(env, query, 5),
+      ]);
+
+      const sections: string[] = [];
+
+      // Format document results
+      if (docResults.length > 0) {
+        sections.push(formatSearchResultsForUser(docResults));
+      }
+
+      // Format initiative results
+      if (initiativeResults.length > 0) {
+        const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
+        for (const result of initiativeResults) {
+          const statusEmoji = result.initiative.status === "active" ? "🟢" :
+            result.initiative.status === "proposed" ? "🟡" :
+            result.initiative.status === "completed" ? "✅" :
+            result.initiative.status === "paused" ? "⏸️" : "❌";
+          initLines.push(`\n${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
+          initLines.push(`  Owner: <@${result.initiative.owner}>`);
+          if (result.snippet !== result.initiative.name) {
+            initLines.push(`  _${result.snippet}_`);
+          }
+        }
+        sections.push(initLines.join("\n"));
+      }
+
+      if (sections.length === 0) {
+        await postMessage(channel, `No results found for "${query}".`, threadTs, env);
+      } else {
+        await postMessage(channel, sections.join("\n\n---\n\n"), threadTs, env);
+      }
       return;
     }
 
@@ -519,6 +608,13 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
         }
         case "remove": {
           const result = await removeInitiative(env, initCommand.name);
+          response = result.message;
+          break;
+        }
+        case "sync-linear": {
+          // Post initial acknowledgment
+          await postMessage(channel, "🔄 Syncing initiatives from Linear...", threadTs, env);
+          const result = await syncLinearProjects(env, user);
           response = result.message;
           break;
         }

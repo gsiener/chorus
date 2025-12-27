@@ -300,3 +300,125 @@ describe("Docs API", () => {
     expect(response.status).toBe(405);
   });
 });
+
+describe("Search Command", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-signing-secret",
+    ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn(),
+      delete: vi.fn(),
+    } as unknown as KVNamespace,
+    VECTORIZE: {
+      query: vi.fn().mockResolvedValue({
+        matches: [
+          {
+            id: "doc:test-doc:chunk:0",
+            score: 0.85,
+            metadata: {
+              title: "Test Strategy Doc",
+              content: "This is the test content about strategy.",
+            },
+          },
+        ],
+      }),
+      insert: vi.fn(),
+      deleteByIds: vi.fn(),
+    } as unknown as VectorizeIndex,
+    AI: {
+      run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2, 0.3]] }),
+    } as unknown as Ai,
+  };
+
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  async function createSignedRequest(
+    body: string,
+    signingSecret: string
+  ): Promise<Request> {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const sigBaseString = `v0:${timestamp}:${body}`;
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(signingSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(sigBaseString));
+    const signature = "v0=" + Array.from(new Uint8Array(signatureBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    return new Request("https://example.com/slack/events", {
+      method: "POST",
+      headers: {
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, user_id: "U_BOT", ts: "1234.5679" }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("handles search command with quoted query", async () => {
+    const body = JSON.stringify({
+      type: "event_callback",
+      event_id: "Ev456",
+      event_time: 1234567890,
+      event: {
+        type: "app_mention",
+        user: "U123",
+        text: '<@U_BOT> search "strategy"',
+        channel: "C123",
+        ts: "1234.5678",
+      },
+    });
+    const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    expect(mockCtx.waitUntil).toHaveBeenCalled();
+  });
+
+  it("handles search command with unquoted query", async () => {
+    const body = JSON.stringify({
+      type: "event_callback",
+      event_id: "Ev789",
+      event_time: 1234567890,
+      event: {
+        type: "app_mention",
+        user: "U123",
+        text: "<@U_BOT> search roadmap planning",
+        channel: "C123",
+        ts: "1234.5678",
+      },
+    });
+    const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    expect(mockCtx.waitUntil).toHaveBeenCalled();
+  });
+});

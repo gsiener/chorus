@@ -425,6 +425,125 @@ export function formatInitiativeList(initiatives: InitiativeMetadata[]): string 
 }
 
 /**
+ * Search initiatives by text matching in name and description
+ */
+export async function searchInitiatives(
+  env: Env,
+  query: string,
+  limit: number = 5
+): Promise<{ initiative: InitiativeMetadata; score: number; snippet: string }[]> {
+  const index = await getIndex(env);
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
+
+  const results: { initiative: InitiativeMetadata; score: number; snippet: string }[] = [];
+
+  for (const meta of index.initiatives) {
+    let score = 0;
+    let snippet = "";
+
+    // Check name match (higher weight)
+    const nameLower = meta.name.toLowerCase();
+    if (nameLower.includes(queryLower)) {
+      score += 10;
+      snippet = meta.name;
+    } else {
+      for (const word of queryWords) {
+        if (nameLower.includes(word)) {
+          score += 3;
+        }
+      }
+    }
+
+    // Load full initiative to search description
+    if (score === 0 || !snippet) {
+      const data = await env.DOCS_KV.get(idToKey(meta.id));
+      if (data) {
+        const init = JSON.parse(data) as Initiative;
+        const descLower = (init.description || "").toLowerCase();
+
+        if (descLower.includes(queryLower)) {
+          score += 5;
+          // Extract snippet around match
+          const matchIndex = descLower.indexOf(queryLower);
+          const start = Math.max(0, matchIndex - 30);
+          const end = Math.min(init.description.length, matchIndex + queryLower.length + 50);
+          snippet = (start > 0 ? "..." : "") + init.description.slice(start, end) + (end < init.description.length ? "..." : "");
+        } else {
+          for (const word of queryWords) {
+            if (descLower.includes(word)) {
+              score += 1;
+              if (!snippet) {
+                const matchIndex = descLower.indexOf(word);
+                const start = Math.max(0, matchIndex - 30);
+                const end = Math.min(init.description.length, matchIndex + 60);
+                snippet = (start > 0 ? "..." : "") + init.description.slice(start, end) + (end < init.description.length ? "..." : "");
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (score > 0) {
+      results.push({
+        initiative: meta,
+        score,
+        snippet: snippet || meta.name,
+      });
+    }
+  }
+
+  // Sort by score descending and limit
+  return results
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+/**
+ * Detect initiative mentions in text and return gaps for nudges
+ * Returns at most one nudge to avoid being preachy
+ */
+export async function detectInitiativeGaps(
+  text: string,
+  env: Env
+): Promise<string | null> {
+  const index = await getIndex(env);
+
+  if (index.initiatives.length === 0) {
+    return null;
+  }
+
+  // Look for initiative names mentioned in the text (case-insensitive)
+  const textLower = text.toLowerCase();
+  const mentionedInitiatives: Initiative[] = [];
+
+  for (const meta of index.initiatives) {
+    // Check if initiative name is mentioned
+    if (textLower.includes(meta.name.toLowerCase())) {
+      const data = await env.DOCS_KV.get(idToKey(meta.id));
+      if (data) {
+        mentionedInitiatives.push(JSON.parse(data) as Initiative);
+      }
+    }
+  }
+
+  // Find the first initiative with gaps
+  for (const init of mentionedInitiatives) {
+    const gaps: string[] = [];
+    if (!init.prdLink) gaps.push("PRD");
+    if (init.expectedMetrics.length === 0) gaps.push("success metrics");
+
+    if (gaps.length > 0) {
+      // Return a single nudge for the first initiative with gaps
+      return `Note: The "${init.name}" initiative is missing ${gaps.join(" and ")}. If relevant, gently suggest adding ${gaps.length === 1 ? "it" : "them"} — but only mention this once and don't be preachy.`;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Get initiatives context for Claude prompt injection
  */
 export async function getInitiativesContext(env: Env): Promise<string | null> {

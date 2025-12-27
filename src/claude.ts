@@ -1,6 +1,6 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
-import { getInitiativesContext } from "./initiatives";
+import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
 
 // Cache configuration
@@ -97,10 +97,11 @@ export async function generateResponse(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
-  // Load initiatives context and search knowledge base in parallel
-  const [searchResults, initiativesContext] = await Promise.all([
+  // Load initiatives context, search knowledge base, and detect gaps in parallel
+  const [searchResults, initiativesContext, gapNudge] = await Promise.all([
     query ? searchDocuments(query, env, 5) : Promise.resolve([]),
     getInitiativesContext(env),
+    query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
 
   // Format search results for context
@@ -112,6 +113,9 @@ export async function generateResponse(
   }
   if (knowledgeContext) {
     systemPrompt += `\n\n${knowledgeContext}`;
+  }
+  if (gapNudge) {
+    systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
 
   const response = await fetchWithRetry(
@@ -177,10 +181,11 @@ export async function generateResponseStreaming(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
-  // Load initiatives context and search knowledge base in parallel
-  const [searchResults, initiativesContext] = await Promise.all([
+  // Load initiatives context, search knowledge base, and detect gaps in parallel
+  const [searchResults, initiativesContext, gapNudge] = await Promise.all([
     query ? searchDocuments(query, env, 5) : Promise.resolve([]),
     getInitiativesContext(env),
+    query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
 
   // Format search results for context
@@ -192,6 +197,9 @@ export async function generateResponseStreaming(
   }
   if (knowledgeContext) {
     systemPrompt += `\n\n${knowledgeContext}`;
+  }
+  if (gapNudge) {
+    systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {

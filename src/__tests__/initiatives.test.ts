@@ -10,6 +10,7 @@ import {
   formatInitiative,
   formatInitiativeList,
   getInitiativesContext,
+  detectInitiativeGaps,
 } from "../initiatives";
 import type { Env, Initiative } from "../types";
 
@@ -295,5 +296,61 @@ describe("getInitiativesContext", () => {
 
     const context = await getInitiativesContext(mockEnv);
     expect(context).toBeNull();
+  });
+});
+
+describe("detectInitiativeGaps", () => {
+  let mockKV: ReturnType<typeof createMockKV>;
+  let mockEnv: Env;
+
+  beforeEach(() => {
+    mockKV = createMockKV();
+    mockEnv = createMockEnv(mockKV);
+  });
+
+  it("returns null when no initiatives", async () => {
+    const nudge = await detectInitiativeGaps("tell me about something", mockEnv);
+    expect(nudge).toBeNull();
+  });
+
+  it("returns nudge for initiative with missing PRD", async () => {
+    await addInitiative(mockEnv, "Mobile App Launch", "Launch mobile app", "U123", "U456");
+
+    const nudge = await detectInitiativeGaps("What's the status of Mobile App Launch?", mockEnv);
+
+    expect(nudge).not.toBeNull();
+    expect(nudge).toContain("Mobile App Launch");
+    expect(nudge).toContain("PRD");
+    expect(nudge).toContain("gently");
+  });
+
+  it("returns null when initiative has all info", async () => {
+    await addInitiative(mockEnv, "Complete Initiative", "All info provided", "U123", "U456");
+    await updateInitiativePrd(mockEnv, "Complete Initiative", "https://docs.google.com/123", "U456");
+    await addInitiativeMetric(mockEnv, "Complete Initiative", { type: "product", name: "DAU", target: "+10%" }, "U456");
+
+    const nudge = await detectInitiativeGaps("Tell me about Complete Initiative", mockEnv);
+    expect(nudge).toBeNull();
+  });
+
+  it("detects initiative mentions case-insensitively", async () => {
+    await addInitiative(mockEnv, "Q1 Revenue Goal", "Increase revenue", "U123", "U456");
+
+    const nudge = await detectInitiativeGaps("How is the q1 revenue goal going?", mockEnv);
+
+    expect(nudge).not.toBeNull();
+    expect(nudge).toContain("Q1 Revenue Goal");
+  });
+
+  it("returns only one nudge for multiple initiatives with gaps", async () => {
+    await addInitiative(mockEnv, "Project A", "First project", "U123", "U456");
+    await addInitiative(mockEnv, "Project B", "Second project", "U123", "U456");
+
+    const nudge = await detectInitiativeGaps("Tell me about Project A and Project B", mockEnv);
+
+    // Should only have one nudge (first match)
+    expect(nudge).not.toBeNull();
+    const prdCount = (nudge!.match(/PRD/g) || []).length;
+    expect(prdCount).toBe(1);
   });
 });

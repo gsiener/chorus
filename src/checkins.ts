@@ -1,0 +1,196 @@
+/**
+ * Weekly DM check-ins for initiative owners
+ *
+ * Sends proactive status updates to initiative owners with:
+ * - Status summary of their initiatives
+ * - Gaps (missing PRD, metrics)
+ * - Nudges for stale initiatives
+ */
+
+import type { Env, InitiativeMetadata, Initiative } from "./types";
+import { postDirectMessage } from "./slack";
+
+// KV keys
+const INITIATIVES_INDEX_KEY = "initiatives:index";
+const INITIATIVES_PREFIX = "initiatives:detail:";
+const LAST_CHECKIN_PREFIX = "checkin:last:";
+
+// Only send check-ins once per week (avoid spam on re-deploys)
+const MIN_CHECKIN_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days
+
+interface InitiativeWithDetails extends InitiativeMetadata {
+  description?: string;
+  lastDiscussedAt?: string;
+}
+
+/**
+ * Get initiatives grouped by owner
+ */
+async function getInitiativesByOwner(
+  env: Env
+): Promise<Map<string, InitiativeWithDetails[]>> {
+  const indexData = await env.DOCS_KV.get(INITIATIVES_INDEX_KEY);
+  if (!indexData) {
+    return new Map();
+  }
+
+  const index = JSON.parse(indexData) as { initiatives: InitiativeMetadata[] };
+  const byOwner = new Map<string, InitiativeWithDetails[]>();
+
+  for (const meta of index.initiatives) {
+    // Skip completed/cancelled initiatives
+    if (meta.status === "completed" || meta.status === "cancelled") {
+      continue;
+    }
+
+    // Load full initiative for additional details
+    const detailData = await env.DOCS_KV.get(`${INITIATIVES_PREFIX}${meta.id}`);
+    const details = detailData ? (JSON.parse(detailData) as Initiative) : null;
+
+    const initiative: InitiativeWithDetails = {
+      ...meta,
+      description: details?.description,
+      lastDiscussedAt: details?.lastDiscussedAt,
+    };
+
+    if (!byOwner.has(meta.owner)) {
+      byOwner.set(meta.owner, []);
+    }
+    byOwner.get(meta.owner)!.push(initiative);
+  }
+
+  return byOwner;
+}
+
+/**
+ * Check if we should send a check-in to this user (rate limiting)
+ */
+async function shouldSendCheckin(userId: string, env: Env): Promise<boolean> {
+  const lastCheckin = await env.DOCS_KV.get(`${LAST_CHECKIN_PREFIX}${userId}`);
+
+  if (!lastCheckin) {
+    return true;
+  }
+
+  const lastTime = parseInt(lastCheckin, 10);
+  return Date.now() - lastTime > MIN_CHECKIN_INTERVAL_MS;
+}
+
+/**
+ * Record that we sent a check-in to this user
+ */
+async function recordCheckin(userId: string, env: Env): Promise<void> {
+  await env.DOCS_KV.put(`${LAST_CHECKIN_PREFIX}${userId}`, Date.now().toString(), {
+    expirationTtl: 60 * 60 * 24 * 14, // Keep for 2 weeks
+  });
+}
+
+/**
+ * Format check-in message for a user
+ */
+function formatCheckinMessage(initiatives: InitiativeWithDetails[]): string {
+  const lines: string[] = [
+    "👋 *Weekly Initiative Check-in*",
+    "",
+    `You own ${initiatives.length} active initiative${initiatives.length === 1 ? "" : "s"}:`,
+  ];
+
+  // Group by status
+  const byStatus = new Map<string, InitiativeWithDetails[]>();
+  for (const init of initiatives) {
+    if (!byStatus.has(init.status)) {
+      byStatus.set(init.status, []);
+    }
+    byStatus.get(init.status)!.push(init);
+  }
+
+  // Show active first, then proposed, then paused
+  const statusOrder = ["active", "proposed", "paused"];
+
+  for (const status of statusOrder) {
+    const inits = byStatus.get(status);
+    if (!inits || inits.length === 0) continue;
+
+    const emoji = status === "active" ? "🟢" : status === "proposed" ? "🟡" : "⏸️";
+    lines.push("");
+    lines.push(`*${status.charAt(0).toUpperCase() + status.slice(1)}:*`);
+
+    for (const init of inits) {
+      const gaps: string[] = [];
+      if (!init.hasPrd) gaps.push("needs PRD");
+      if (!init.hasMetrics) gaps.push("needs metrics");
+
+      let line = `${emoji} ${init.name}`;
+      if (gaps.length > 0) {
+        line += ` _(${gaps.join(", ")})_`;
+      }
+      lines.push(line);
+    }
+  }
+
+  // Summary of gaps
+  const totalMissingPrd = initiatives.filter((i) => !i.hasPrd).length;
+  const totalMissingMetrics = initiatives.filter((i) => !i.hasMetrics).length;
+
+  if (totalMissingPrd > 0 || totalMissingMetrics > 0) {
+    lines.push("");
+    lines.push("*Quick wins this week:*");
+    if (totalMissingPrd > 0) {
+      lines.push(`• Add PRD links to ${totalMissingPrd} initiative${totalMissingPrd === 1 ? "" : "s"}`);
+    }
+    if (totalMissingMetrics > 0) {
+      lines.push(`• Define metrics for ${totalMissingMetrics} initiative${totalMissingMetrics === 1 ? "" : "s"}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("_Reply to update any initiative, or use_ `@Chorus initiatives` _to see all._");
+
+  return lines.join("\n");
+}
+
+/**
+ * Send weekly check-in DMs to all initiative owners
+ */
+export async function sendWeeklyCheckins(
+  env: Env
+): Promise<{ success: boolean; message: string; sentTo: number }> {
+  try {
+    const byOwner = await getInitiativesByOwner(env);
+    let sentCount = 0;
+
+    for (const [ownerId, initiatives] of byOwner) {
+      // Skip if we recently sent a check-in
+      if (!(await shouldSendCheckin(ownerId, env))) {
+        console.log(`Skipping check-in for ${ownerId} (recently sent)`);
+        continue;
+      }
+
+      // Format and send the message
+      const message = formatCheckinMessage(initiatives);
+      const result = await postDirectMessage(ownerId, message, env);
+
+      if (result) {
+        await recordCheckin(ownerId, env);
+        sentCount++;
+        console.log(`Sent check-in to ${ownerId}`);
+      } else {
+        console.error(`Failed to send check-in to ${ownerId}`);
+      }
+    }
+
+    return {
+      success: true,
+      message: `Sent weekly check-ins to ${sentCount} owner${sentCount === 1 ? "" : "s"}.`,
+      sentTo: sentCount,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Weekly check-in error:", error);
+    return {
+      success: false,
+      message: `Failed to send check-ins: ${errorMessage}`,
+      sentTo: 0,
+    };
+  }
+}

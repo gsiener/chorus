@@ -163,3 +163,41 @@ export async function addReaction(
 
   return true;
 }
+
+/**
+ * Open a DM channel with a user and post a message
+ */
+export async function postDirectMessage(
+  userId: string,
+  text: string,
+  env: Env
+): Promise<string | null> {
+  // First, open a DM channel with the user
+  const openResponse = await fetchWithRetry(
+    "https://slack.com/api/conversations.open",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        users: userId,
+      }),
+    }
+  );
+
+  const openData = (await openResponse.json()) as {
+    ok: boolean;
+    channel?: { id: string };
+    error?: string;
+  };
+
+  if (!openData.ok || !openData.channel) {
+    console.error("Failed to open DM:", openData.error);
+    return null;
+  }
+
+  // Post the message to the DM channel
+  return postMessage(openData.channel.id, text, undefined, env);
+}
