@@ -196,20 +196,46 @@ describe("Initiative CRUD", () => {
     });
 
     it("lists all initiatives", async () => {
-      const initiatives = await listInitiatives(mockEnv);
-      expect(initiatives).toHaveLength(2);
+      const result = await listInitiatives(mockEnv);
+      expect(result.items).toHaveLength(2);
+      expect(result.totalItems).toBe(2);
     });
 
     it("filters by owner", async () => {
-      const initiatives = await listInitiatives(mockEnv, { owner: "U123" });
-      expect(initiatives).toHaveLength(1);
-      expect(initiatives[0].name).toBe("Init A");
+      const result = await listInitiatives(mockEnv, { owner: "U123" });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].name).toBe("Init A");
     });
 
     it("filters by status", async () => {
-      const initiatives = await listInitiatives(mockEnv, { status: "active" });
-      expect(initiatives).toHaveLength(1);
-      expect(initiatives[0].name).toBe("Init A");
+      const result = await listInitiatives(mockEnv, { status: "active" });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].name).toBe("Init A");
+    });
+
+    it("supports pagination", async () => {
+      // Add more initiatives for pagination testing
+      for (let i = 0; i < 15; i++) {
+        await addInitiative(mockEnv, `Init ${i + 10}`, "desc", "U999", "U456");
+      }
+
+      // Test first page
+      const page1 = await listInitiatives(mockEnv, undefined, { page: 1, pageSize: 5 });
+      expect(page1.items).toHaveLength(5);
+      expect(page1.page).toBe(1);
+      expect(page1.totalPages).toBe(4); // 17 total / 5 per page = 4 pages
+      expect(page1.hasMore).toBe(true);
+
+      // Test second page
+      const page2 = await listInitiatives(mockEnv, undefined, { page: 2, pageSize: 5 });
+      expect(page2.items).toHaveLength(5);
+      expect(page2.page).toBe(2);
+      expect(page2.hasMore).toBe(true);
+
+      // Test last page
+      const page4 = await listInitiatives(mockEnv, undefined, { page: 4, pageSize: 5 });
+      expect(page4.items).toHaveLength(2); // Only 2 remaining
+      expect(page4.hasMore).toBe(false);
     });
   });
 });

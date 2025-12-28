@@ -115,13 +115,15 @@ Just ask me anything about your product strategy, roadmap, or initiatives in nat
 function parseDocCommand(
   text: string,
   botUserId: string
-): { type: "add"; title: string; content: string } | { type: "remove"; title: string } | { type: "list" } | { type: "backfill" } | null {
+): { type: "add"; title: string; content: string } | { type: "remove"; title: string } | { type: "list"; page?: number } | { type: "backfill" } | null {
   // Remove bot mention and trim
   const cleaned = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
 
-  // List docs: "docs" or "list docs"
-  if (/^(list\s+)?docs$/i.test(cleaned)) {
-    return { type: "list" };
+  // List docs: "docs" or "list docs" with optional --page N
+  if (/^(list\s+)?docs(\s+--page\s+\d+)?$/i.test(cleaned)) {
+    const pageMatch = cleaned.match(/--page\s+(\d+)/i);
+    const page = pageMatch ? parseInt(pageMatch[1], 10) : undefined;
+    return { type: "list", page };
   }
 
   // Backfill docs: "backfill docs"
@@ -146,7 +148,7 @@ function parseDocCommand(
 
 // Initiative command types
 type InitiativeCommand =
-  | { type: "list"; filters?: { owner?: string; status?: InitiativeStatusValue } }
+  | { type: "list"; filters?: { owner?: string; status?: InitiativeStatusValue }; page?: number }
   | { type: "add"; name: string; owner: string; description: string }
   | { type: "show"; name: string }
   | { type: "update-status"; name: string; status: InitiativeStatusValue }
@@ -167,34 +169,38 @@ function parseInitiativeCommand(
 ): InitiativeCommand | null {
   const cleaned = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
 
-  // List initiatives: "initiatives" or "initiative list"
-  if (/^initiatives?$/i.test(cleaned) || /^initiatives?\s+list$/i.test(cleaned)) {
-    return { type: "list" };
-  }
-
   // Sync from Linear: "initiatives sync linear"
   if (/^initiatives?\s+sync\s+linear$/i.test(cleaned)) {
     return { type: "sync-linear" };
   }
 
-  // List with filters: "initiatives --mine" or "initiatives --status active"
-  const listFilterMatch = cleaned.match(/^initiatives?\s+list\s+(.+)$/i) ||
-    cleaned.match(/^initiatives?\s+(--\S+.*)$/i);
-  if (listFilterMatch) {
+  // List initiatives: "initiatives" or "initiative list" with optional flags
+  // Supports: --mine, --status X, --page N
+  if (/^initiatives?(\s+|$)/i.test(cleaned)) {
     const filters: { owner?: string; status?: InitiativeStatusValue } = {};
-    const filterStr = listFilterMatch[1];
+    let page: number | undefined;
 
-    if (/--mine/i.test(filterStr)) {
-      // Will be filled in by caller with current user
+    // Extract --mine flag
+    if (/--mine/i.test(cleaned)) {
       filters.owner = "__CURRENT_USER__";
     }
 
-    const statusMatch = filterStr.match(/--status\s+(\w+)/i);
+    // Extract --status flag
+    const statusMatch = cleaned.match(/--status\s+(\w+)/i);
     if (statusMatch && VALID_STATUSES.includes(statusMatch[1].toLowerCase() as InitiativeStatusValue)) {
       filters.status = statusMatch[1].toLowerCase() as InitiativeStatusValue;
     }
 
-    return { type: "list", filters };
+    // Extract --page flag
+    const pageMatch = cleaned.match(/--page\s+(\d+)/i);
+    if (pageMatch) {
+      page = parseInt(pageMatch[1], 10);
+    }
+
+    // Only return if this is a list command (not another initiative subcommand)
+    if (/^initiatives?(\s+list)?(\s+--|\s*$)/i.test(cleaned)) {
+      return { type: "list", filters: Object.keys(filters).length > 0 ? filters : undefined, page };
+    }
   }
 
   // Add initiative: initiative add "Name" - owner @user - description: text
@@ -561,7 +567,8 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
           if (filters?.owner === "__CURRENT_USER__") {
             filters.owner = user;
           }
-          const initiatives = await listInitiatives(env, filters);
+          const pagination = initCommand.page ? { page: initCommand.page } : undefined;
+          const initiatives = await listInitiatives(env, filters, pagination);
           response = formatInitiativeList(initiatives);
           break;
         }
@@ -650,7 +657,8 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       let response: string;
 
       if (docCommand.type === "list") {
-        response = await listDocuments(env);
+        const pagination = docCommand.page ? { page: docCommand.page } : undefined;
+        response = await listDocuments(env, pagination);
       } else if (docCommand.type === "add") {
         const result = await addDocument(env, docCommand.title, docCommand.content, user);
         response = result.message;

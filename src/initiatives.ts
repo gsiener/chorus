@@ -76,13 +76,32 @@ function toMetadata(init: Initiative): InitiativeMetadata {
   };
 }
 
+// Default page size for listings
+const DEFAULT_PAGE_SIZE = 10;
+
+export interface PaginationOptions {
+  page?: number;        // 1-indexed page number
+  pageSize?: number;    // Items per page
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
 /**
  * Get all initiatives metadata (for listing)
+ * Supports optional pagination
  */
 export async function listInitiatives(
   env: Env,
-  filters?: { owner?: string; status?: InitiativeStatusValue }
-): Promise<InitiativeMetadata[]> {
+  filters?: { owner?: string; status?: InitiativeStatusValue },
+  pagination?: PaginationOptions
+): Promise<PaginatedResult<InitiativeMetadata>> {
   const index = await getIndex(env);
   let initiatives = index.initiatives;
 
@@ -93,7 +112,23 @@ export async function listInitiatives(
     initiatives = initiatives.filter((i) => i.status === filters.status);
   }
 
-  return initiatives;
+  const totalItems = initiatives.length;
+  const page = Math.max(1, pagination?.page ?? 1);
+  const pageSize = Math.max(1, Math.min(50, pagination?.pageSize ?? DEFAULT_PAGE_SIZE));
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  // Apply pagination
+  const startIndex = (page - 1) * pageSize;
+  const paginatedItems = initiatives.slice(startIndex, startIndex + pageSize);
+
+  return {
+    items: paginatedItems,
+    page,
+    pageSize,
+    totalItems,
+    totalPages,
+    hasMore: page < totalPages,
+  };
 }
 
 /**
@@ -383,9 +418,20 @@ export function formatInitiative(init: Initiative): string {
 
 /**
  * Format initiative list for display
+ * Accepts either paginated result or raw array (for backward compatibility)
  */
-export function formatInitiativeList(initiatives: InitiativeMetadata[]): string {
+export function formatInitiativeList(
+  result: PaginatedResult<InitiativeMetadata> | InitiativeMetadata[]
+): string {
+  // Handle both paginated and raw array input
+  const isPaginated = !Array.isArray(result);
+  const initiatives = isPaginated ? result.items : result;
+  const paginationInfo = isPaginated ? result : null;
+
   if (initiatives.length === 0) {
+    if (paginationInfo && paginationInfo.totalItems > 0) {
+      return `No initiatives on page ${paginationInfo.page}. Total: ${paginationInfo.totalItems}`;
+    }
     return "No initiatives found. Create one with:\n`@Chorus initiative add \"Name\" - owner @user - description: Your description`";
   }
 
@@ -397,7 +443,19 @@ export function formatInitiativeList(initiatives: InitiativeMetadata[]): string 
     byStatus[init.status].push(init);
   }
 
-  const lines: string[] = [`*Initiatives* (${initiatives.length} total)`];
+  // Header with pagination info
+  const headerParts = ["*Initiatives*"];
+  if (paginationInfo) {
+    if (paginationInfo.totalPages > 1) {
+      headerParts.push(`(page ${paginationInfo.page}/${paginationInfo.totalPages}, ${paginationInfo.totalItems} total)`);
+    } else {
+      headerParts.push(`(${paginationInfo.totalItems} total)`);
+    }
+  } else {
+    headerParts.push(`(${initiatives.length} total)`);
+  }
+
+  const lines: string[] = [headerParts.join(" ")];
 
   const statusOrder: InitiativeStatusValue[] = [
     "active",
@@ -419,6 +477,11 @@ export function formatInitiativeList(initiatives: InitiativeMetadata[]): string 
       const gapStr = gaps.length > 0 ? ` _(${gaps.join(", ")})_` : "";
       lines.push(`• ${init.name} - <@${init.owner}>${gapStr}`);
     }
+  }
+
+  // Add pagination hint if there are more pages
+  if (paginationInfo?.hasMore) {
+    lines.push(`\n_Use \`initiatives --page ${paginationInfo.page + 1}\` for more_`);
   }
 
   return lines.join("\n");

@@ -194,22 +194,68 @@ export async function removeDocument(
   };
 }
 
+// Default page size for doc listings
+const DEFAULT_DOC_PAGE_SIZE = 10;
+
+export interface DocPaginationOptions {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedDocResult {
+  items: DocMetadata[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
 /**
  * List all documents in the knowledge base
+ * Supports optional pagination
  */
-export async function listDocuments(env: Env): Promise<string> {
+export async function listDocuments(
+  env: Env,
+  pagination?: DocPaginationOptions
+): Promise<string> {
   const index = await getIndex(env);
 
   if (index.documents.length === 0) {
     return "The knowledge base is empty. Add documents with:\n`@Chorus add doc \"Title\": Your content here...`";
   }
 
-  const lines = index.documents.map((doc) => {
+  const totalItems = index.documents.length;
+  const page = Math.max(1, pagination?.page ?? 1);
+  const pageSize = Math.max(1, Math.min(50, pagination?.pageSize ?? DEFAULT_DOC_PAGE_SIZE));
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  // Apply pagination
+  const startIndex = (page - 1) * pageSize;
+  const paginatedDocs = index.documents.slice(startIndex, startIndex + pageSize);
+  const hasMore = page < totalPages;
+
+  const lines = paginatedDocs.map((doc) => {
     const date = new Date(doc.addedAt).toLocaleDateString();
     return `• *${doc.title}* (${doc.charCount} chars, added ${date})`;
   });
 
-  return `*Knowledge Base* (${index.documents.length} docs)\n\n${lines.join("\n")}`;
+  // Header with pagination info
+  const headerParts = ["*Knowledge Base*"];
+  if (totalPages > 1) {
+    headerParts.push(`(page ${page}/${totalPages}, ${totalItems} docs)`);
+  } else {
+    headerParts.push(`(${totalItems} docs)`);
+  }
+
+  let result = `${headerParts.join(" ")}\n\n${lines.join("\n")}`;
+
+  // Add pagination hint if there are more pages
+  if (hasMore) {
+    result += `\n\n_Use \`docs --page ${page + 1}\` for more_`;
+  }
+
+  return result;
 }
 
 /**
