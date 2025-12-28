@@ -3,6 +3,11 @@ import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
 import { recordGenAiMetrics } from "./telemetry";
+import {
+  getThreadContext,
+  updateThreadContext,
+  processMessagesForContext,
+} from "./thread-context";
 
 // Cache configuration
 const CACHE_PREFIX = "cache:response:";
@@ -82,9 +87,15 @@ function convertToSlackFormat(text: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
 }
 
+export interface ThreadInfo {
+  channel: string;
+  threadTs: string;
+}
+
 export async function generateResponse(
   messages: ClaudeMessage[],
-  env: Env
+  env: Env,
+  threadInfo?: ThreadInfo
 ): Promise<GenerateResponseResult> {
   // Check cache first
   const cacheKey = getCacheKey(messages);
@@ -98,6 +109,18 @@ export async function generateResponse(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
+  // Get thread context if we're in a thread
+  let threadContext = null;
+  if (threadInfo) {
+    threadContext = await getThreadContext(threadInfo.channel, threadInfo.threadTs, env);
+  }
+
+  // Process messages with thread context (summarize if long)
+  const { messages: processedMessages, contextPrefix } = processMessagesForContext(
+    messages,
+    threadContext
+  );
+
   // Load initiatives context, search knowledge base, and detect gaps in parallel
   const [searchResults, initiativesContext, gapNudge] = await Promise.all([
     query ? searchDocuments(query, env, 5) : Promise.resolve([]),
@@ -109,6 +132,13 @@ export async function generateResponse(
   const knowledgeContext = formatSearchResultsForContext(searchResults);
 
   let systemPrompt = SYSTEM_PROMPT;
+
+  // Add thread context summary if available
+  if (contextPrefix) {
+    systemPrompt += `\n\n${contextPrefix}`;
+    console.log(`Using thread context summary (${messages.length} messages -> ${processedMessages.length} recent)`);
+  }
+
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
@@ -132,7 +162,7 @@ export async function generateResponse(
         model: CLAUDE_MODEL,
         max_tokens: CLAUDE_MAX_TOKENS,
         system: systemPrompt,
-        messages,
+        messages: processedMessages,
       }),
     },
     { initialDelayMs: 1000 }
@@ -168,6 +198,19 @@ export async function generateResponse(
 
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
+
+  // Update thread context for future messages (fire and forget)
+  if (threadInfo) {
+    // Note: Initiative detection could be enhanced by analyzing the response text
+    // For now, we store context without explicit initiative tracking
+    updateThreadContext(
+      threadInfo.channel,
+      threadInfo.threadTs,
+      messages,
+      [], // Initiative mentions extracted separately if needed
+      env
+    ).catch(err => console.error("Failed to update thread context:", err));
+  }
 
   return { text, inputTokens, outputTokens, cached: false };
 }

@@ -1,6 +1,6 @@
 import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
-import { convertThreadToMessages, generateResponse } from "./claude";
+import { convertThreadToMessages, generateResponse, ThreadInfo } from "./claude";
 import { addDocument, removeDocument, listDocuments, backfillDocuments } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
@@ -692,8 +692,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       throw new Error("Failed to post thinking message");
     }
 
-    // Generate response
-    const result = await generateResponse(messages, env);
+    // Generate response with thread context
+    const threadInfo: ThreadInfo | undefined = threadTs ? { channel, threadTs } : undefined;
+    const result = await generateResponse(messages, env, threadInfo);
 
     // Update with final response
     await updateMessage(channel, thinkingTs, result.text, env);

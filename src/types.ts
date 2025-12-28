@@ -142,3 +142,15 @@ export interface InitiativeIndex {
   initiatives: InitiativeMetadata[];
   lastSyncedWithLinear?: string;
 }
+
+// Thread context types for conversation memory
+
+export interface ThreadContext {
+  threadTs: string;            // Thread identifier
+  channel: string;             // Channel ID
+  summary?: string;            // Summary of earlier conversation
+  keyTopics: string[];         // Key topics/entities mentioned
+  initiativesMentioned: string[]; // Initiative IDs discussed
+  messageCount: number;        // Total messages in thread
+  lastUpdatedAt: string;       // When context was last updated
+}
