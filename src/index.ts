@@ -21,21 +21,33 @@ import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
 import { recordCommand, recordError } from "./telemetry";
 
-// Rate limiting for doc commands (per user, per minute)
-const DOC_COMMAND_RATE_LIMIT = 10;
+// Rate limiting configuration (per user, per minute)
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
+
+// Command-specific rate limits
+const RATE_LIMITS: Record<string, number> = {
+  doc: 10,      // Doc add/remove: 10 per minute
+  search: 20,   // Search commands: 20 per minute (more lenient)
+  default: 30,  // Default for other commands
+};
 
 // Event deduplication (prevent duplicate responses from Slack retries)
 const EVENT_DEDUP_TTL_SECONDS = 60; // 1 minute
 const EVENT_DEDUP_KEY_PREFIX = "event:";
 
 /**
- * Check if user is rate limited (using KV for global state across workers)
+ * Check if user is rate limited for a specific command type
+ * Uses KV for global state across workers
  */
-async function isRateLimited(userId: string, env: Env): Promise<boolean> {
-  const key = `${RATE_LIMIT_KEY_PREFIX}${userId}`;
+async function isRateLimited(
+  userId: string,
+  commandType: string,
+  env: Env
+): Promise<boolean> {
+  const key = `${RATE_LIMIT_KEY_PREFIX}${commandType}:${userId}`;
   const now = Date.now();
+  const limit = RATE_LIMITS[commandType] ?? RATE_LIMITS.default;
 
   const stored = await env.DOCS_KV.get<{ count: number; resetTime: number }>(key, "json");
 
@@ -47,7 +59,8 @@ async function isRateLimited(userId: string, env: Env): Promise<boolean> {
     return false;
   }
 
-  if (stored.count >= DOC_COMMAND_RATE_LIMIT) {
+  if (stored.count >= limit) {
+    console.log(`Rate limit hit for ${commandType} by user ${userId}: ${stored.count}/${limit}`);
     return true;
   }
 
@@ -486,6 +499,18 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const searchCommand = parseSearchCommand(text, botUserId);
     if (searchCommand) {
       recordCommand("search");
+
+      // Rate limit search commands
+      if (await isRateLimited(user, "search", env)) {
+        await postMessage(
+          channel,
+          "You're searching too quickly. Please wait a moment before trying again.",
+          threadTs,
+          env
+        );
+        return;
+      }
+
       const { query } = searchCommand;
 
       // Search both documents and initiatives in parallel
@@ -644,7 +669,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     if (docCommand) {
       recordCommand(`docs:${docCommand.type}`);
       // Rate limit doc commands (except list)
-      if (docCommand.type !== "list" && await isRateLimited(user, env)) {
+      if (docCommand.type !== "list" && await isRateLimited(user, "doc", env)) {
         await postMessage(
           channel,
           "You're adding documents too quickly. Please wait a minute before trying again.",
