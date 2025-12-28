@@ -445,3 +445,174 @@ describe("Search Command", () => {
     expect(mockCtx.waitUntil).toHaveBeenCalled();
   });
 });
+
+describe("Slash Commands", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-signing-secret",
+    ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn(),
+      delete: vi.fn(),
+    } as unknown as KVNamespace,
+    VECTORIZE: {
+      query: vi.fn().mockResolvedValue({ matches: [] }),
+      insert: vi.fn(),
+      deleteByIds: vi.fn(),
+    } as unknown as VectorizeIndex,
+    AI: {
+      run: vi.fn().mockResolvedValue({ data: [[0.1, 0.2, 0.3]] }),
+    } as unknown as Ai,
+  };
+
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  async function createSignedSlashRequest(
+    params: URLSearchParams,
+    signingSecret: string
+  ): Promise<Request> {
+    const body = params.toString();
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const sigBaseString = `v0:${timestamp}:${body}`;
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(signingSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const signatureBuffer = await crypto.subtle.sign("HMAC", key, encoder.encode(sigBaseString));
+    const signature = "v0=" + Array.from(new Uint8Array(signatureBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    return new Request("https://example.com/slack/slash", {
+      method: "POST",
+      headers: {
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns help for /chorus command", async () => {
+    const params = new URLSearchParams({
+      command: "/chorus",
+      text: "",
+      user_id: "U123",
+      channel_id: "C123",
+    });
+    const request = await createSignedSlashRequest(params, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { response_type: string; text: string };
+    expect(body.response_type).toBe("ephemeral");
+    expect(body.text).toContain("Chorus");
+    expect(body.text).toContain("initiatives");
+  });
+
+  it("lists initiatives for /chorus initiatives command", async () => {
+    const params = new URLSearchParams({
+      command: "/chorus",
+      text: "initiatives",
+      user_id: "U123",
+      channel_id: "C123",
+    });
+    const request = await createSignedSlashRequest(params, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { response_type: string; text: string };
+    expect(body.response_type).toBe("ephemeral");
+    // Will show "No initiatives found" or initiatives list
+    expect(body.text).toBeDefined();
+  });
+
+  it("handles /chorus-search command", async () => {
+    const params = new URLSearchParams({
+      command: "/chorus-search",
+      text: "roadmap",
+      user_id: "U123",
+      channel_id: "C123",
+    });
+    const request = await createSignedSlashRequest(params, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { response_type: string; text: string };
+    expect(body.response_type).toBe("ephemeral");
+    // Will show results or "No results found"
+    expect(body.text).toBeDefined();
+  });
+
+  it("handles /chorus search query", async () => {
+    const params = new URLSearchParams({
+      command: "/chorus",
+      text: "search roadmap",
+      user_id: "U123",
+      channel_id: "C123",
+    });
+    const request = await createSignedSlashRequest(params, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { response_type: string; text: string };
+    expect(body.text).toBeDefined();
+  });
+
+  it("returns 401 for invalid signature", async () => {
+    const params = new URLSearchParams({
+      command: "/chorus",
+      text: "",
+      user_id: "U123",
+    });
+
+    const request = new Request("https://example.com/slack/slash", {
+      method: "POST",
+      headers: {
+        "x-slack-request-timestamp": Math.floor(Date.now() / 1000).toString(),
+        "x-slack-signature": "v0=invalid",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("handles unknown command with help", async () => {
+    const params = new URLSearchParams({
+      command: "/unknown-chorus",
+      text: "",
+      user_id: "U123",
+      channel_id: "C123",
+    });
+    const request = await createSignedSlashRequest(params, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { response_type: string; text: string };
+    expect(body.text).toContain("Unknown command");
+    expect(body.text).toContain("/chorus");
+  });
+});

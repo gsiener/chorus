@@ -449,6 +449,105 @@ async function handleDocsApi(request: Request, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * Handle Slack slash commands
+ * Slash commands are sent as application/x-www-form-urlencoded POST requests
+ */
+async function handleSlashCommand(request: Request, env: Env): Promise<Response> {
+  const body = await request.text();
+
+  // Verify Slack signature
+  const isValid = await verifySlackSignature(request, body, env.SLACK_SIGNING_SECRET);
+  if (!isValid) {
+    return new Response("Invalid signature", { status: 401 });
+  }
+
+  // Parse form data
+  const params = new URLSearchParams(body);
+  const command = params.get("command") || "";
+  const text = params.get("text") || "";
+  const userId = params.get("user_id") || "";
+
+  recordCommand(`slash:${command.replace("/", "")}`);
+
+  // Route based on command
+  let response: string;
+
+  if (command === "/chorus" || command === "/chorus-help") {
+    // Main help command
+    response = HELP_TEXT;
+  } else if (command === "/chorus-initiatives" || (command === "/chorus" && text.toLowerCase().startsWith("initiatives"))) {
+    // List initiatives
+    const textParts = text.toLowerCase().replace(/^initiatives?\s*/i, "");
+    const filters: { owner?: string; status?: InitiativeStatusValue } = {};
+
+    if (textParts.includes("mine")) {
+      filters.owner = userId;
+    }
+
+    for (const status of VALID_STATUSES) {
+      if (textParts.includes(status)) {
+        filters.status = status;
+        break;
+      }
+    }
+
+    const initiatives = await listInitiatives(env, Object.keys(filters).length > 0 ? filters : undefined);
+    response = formatInitiativeList(initiatives);
+  } else if (command === "/chorus-search" || (command === "/chorus" && text.toLowerCase().startsWith("search"))) {
+    // Search
+    const query = text.replace(/^search\s*/i, "").trim();
+
+    if (!query) {
+      response = "Please provide a search query. Usage: `/chorus-search <query>`";
+    } else {
+      // Rate limit search
+      if (await isRateLimited(userId, "search", env)) {
+        response = "You're searching too quickly. Please wait a moment.";
+      } else {
+        const [docResults, initiativeResults] = await Promise.all([
+          searchDocuments(query, env, 5),
+          searchInitiatives(env, query, 5),
+        ]);
+
+        const sections: string[] = [];
+
+        if (docResults.length > 0) {
+          sections.push(formatSearchResultsForUser(docResults));
+        }
+
+        if (initiativeResults.length > 0) {
+          const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
+          for (const result of initiativeResults) {
+            const statusEmoji = result.initiative.status === "active" ? "🟢" :
+              result.initiative.status === "proposed" ? "🟡" :
+              result.initiative.status === "completed" ? "✅" :
+              result.initiative.status === "paused" ? "⏸️" : "❌";
+            initLines.push(`${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
+          }
+          sections.push(initLines.join("\n"));
+        }
+
+        response = sections.length > 0 ? sections.join("\n\n---\n\n") : `No results found for "${query}".`;
+      }
+    }
+  } else if (command === "/chorus-docs") {
+    // List docs
+    response = await listDocuments(env);
+  } else {
+    // Unknown command - show help
+    response = `Unknown command. Try:\n• \`/chorus\` - Get help\n• \`/chorus initiatives\` - List initiatives\n• \`/chorus search <query>\` - Search everything\n• \`/chorus-docs\` - List documents`;
+  }
+
+  // Return ephemeral response (only visible to the user who triggered the command)
+  return new Response(JSON.stringify({
+    response_type: "ephemeral",
+    text: response,
+  }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 // Export handler for testing
 export const handler = {
   /**
@@ -465,6 +564,11 @@ export const handler = {
     // Route /api/docs to the docs API handler
     if (url.pathname === "/api/docs") {
       return handleDocsApi(request, env);
+    }
+
+    // Route /slack/slash to slash command handler
+    if (url.pathname === "/slack/slash") {
+      return handleSlashCommand(request, env);
     }
 
     // Slack webhook requires POST
