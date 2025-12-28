@@ -26,6 +26,7 @@ interface InitiativeWithDetails extends InitiativeMetadata {
 
 /**
  * Get initiatives grouped by owner
+ * Uses batch KV reads to avoid N+1 query pattern
  */
 async function getInitiativesByOwner(
   env: Env
@@ -36,18 +37,29 @@ async function getInitiativesByOwner(
   }
 
   const index = JSON.parse(indexData) as { initiatives: InitiativeMetadata[] };
-  const byOwner = new Map<string, InitiativeWithDetails[]>();
 
-  for (const meta of index.initiatives) {
-    // Skip completed/cancelled initiatives
-    if (meta.status === "completed" || meta.status === "cancelled") {
-      continue;
-    }
+  // Filter to active initiatives first
+  const activeInitiatives = index.initiatives.filter(
+    (meta) => meta.status !== "completed" && meta.status !== "cancelled"
+  );
 
-    // Load full initiative for additional details
+  if (activeInitiatives.length === 0) {
+    return new Map();
+  }
+
+  // Batch load all initiative details in parallel (fixes N+1 query issue)
+  const detailPromises = activeInitiatives.map(async (meta) => {
     const detailData = await env.DOCS_KV.get(`${INITIATIVES_PREFIX}${meta.id}`);
     const details = detailData ? (JSON.parse(detailData) as Initiative) : null;
+    return { meta, details };
+  });
 
+  const results = await Promise.all(detailPromises);
+
+  // Group by owner
+  const byOwner = new Map<string, InitiativeWithDetails[]>();
+
+  for (const { meta, details } of results) {
     const initiative: InitiativeWithDetails = {
       ...meta,
       description: details?.description,
