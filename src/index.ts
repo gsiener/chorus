@@ -23,6 +23,7 @@ import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
 import { recordCommand, recordError } from "./telemetry";
+import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 
 // Rate limiting configuration (per user, per minute)
 const RATE_LIMIT_WINDOW_SECONDS = 60;
@@ -878,6 +879,17 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
       await postMessage(channel, response, threadTs, env);
       return;
+    }
+
+    // Try natural language initiative commands before falling back to Claude
+    if (mightBeInitiativeCommand(cleanedText)) {
+      recordCommand("nlp:initiative");
+      const nlpResult = await processNaturalLanguageCommand(cleanedText, user, env);
+      if (nlpResult) {
+        await postMessage(channel, nlpResult, threadTs, env);
+        return;
+      }
+      // If NLP didn't handle it, fall through to regular Claude
     }
 
     // Regular message - route to Claude
