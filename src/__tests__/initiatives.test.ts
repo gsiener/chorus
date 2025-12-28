@@ -5,6 +5,9 @@ import {
   removeInitiative,
   updateInitiativeStatus,
   updateInitiativePrd,
+  updateInitiativeName,
+  updateInitiativeDescription,
+  updateInitiativeOwner,
   addInitiativeMetric,
   listInitiatives,
   formatInitiative,
@@ -141,6 +144,67 @@ describe("Initiative CRUD", () => {
 
       const initiative = await getInitiative(mockEnv, "Test");
       expect(initiative?.prdLink).toBe("https://docs.google.com/doc/123");
+    });
+  });
+
+  describe("updateInitiativeName", () => {
+    it("renames an initiative", async () => {
+      await addInitiative(mockEnv, "Old Name", "desc", "U123", "U456");
+      const result = await updateInitiativeName(mockEnv, "Old Name", "New Name", "U789");
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("Renamed");
+      expect(result.message).toContain("New Name");
+
+      // New name should find it
+      const initiative = await getInitiative(mockEnv, "New Name");
+      expect(initiative?.name).toBe("New Name");
+      expect(initiative?.description).toBe("desc"); // Other fields preserved
+    });
+
+    it("fails for non-existent initiative", async () => {
+      const result = await updateInitiativeName(mockEnv, "NonExistent", "New Name", "U789");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("not found");
+    });
+  });
+
+  describe("updateInitiativeDescription", () => {
+    it("updates description", async () => {
+      await addInitiative(mockEnv, "Test", "old description", "U123", "U456");
+      const result = await updateInitiativeDescription(mockEnv, "Test", "new description", "U789");
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("Updated description");
+
+      const initiative = await getInitiative(mockEnv, "Test");
+      expect(initiative?.description).toBe("new description");
+    });
+
+    it("fails for non-existent initiative", async () => {
+      const result = await updateInitiativeDescription(mockEnv, "NonExistent", "desc", "U789");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("not found");
+    });
+  });
+
+  describe("updateInitiativeOwner", () => {
+    it("changes owner", async () => {
+      await addInitiative(mockEnv, "Test", "desc", "U123", "U456");
+      const result = await updateInitiativeOwner(mockEnv, "Test", "U999", "U789");
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("Updated owner");
+      expect(result.message).toContain("<@U999>");
+
+      const initiative = await getInitiative(mockEnv, "Test");
+      expect(initiative?.owner).toBe("U999");
+    });
+
+    it("fails for non-existent initiative", async () => {
+      const result = await updateInitiativeOwner(mockEnv, "NonExistent", "U999", "U789");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("not found");
     });
   });
 

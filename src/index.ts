@@ -9,6 +9,9 @@ import {
   removeInitiative,
   updateInitiativeStatus,
   updateInitiativePrd,
+  updateInitiativeName,
+  updateInitiativeDescription,
+  updateInitiativeOwner,
   addInitiativeMetric,
   listInitiatives,
   formatInitiative,
@@ -104,6 +107,9 @@ Just ask me anything about your product strategy, roadmap, or initiatives in nat
 • \`@Chorus initiative add "Name" - owner @user - description: text\`
 • \`@Chorus initiative "Name" update status [proposed|active|paused|completed|cancelled]\`
 • \`@Chorus initiative "Name" update prd [url]\` — link your PRD
+• \`@Chorus initiative "Name" update name "New Name"\` — rename
+• \`@Chorus initiative "Name" update description "New description"\`
+• \`@Chorus initiative "Name" update owner @newuser\` — reassign
 • \`@Chorus initiative "Name" add metric: [gtm|product] [name] - target: [target]\`
 • \`@Chorus initiative "Name" remove\`
 • \`@Chorus initiatives sync linear\` — import from Linear
@@ -166,6 +172,9 @@ type InitiativeCommand =
   | { type: "show"; name: string }
   | { type: "update-status"; name: string; status: InitiativeStatusValue }
   | { type: "update-prd"; name: string; prdLink: string }
+  | { type: "update-name"; name: string; newName: string }
+  | { type: "update-description"; name: string; newDescription: string }
+  | { type: "update-owner"; name: string; newOwner: string }
   | { type: "add-metric"; name: string; metric: ExpectedMetric }
   | { type: "remove"; name: string }
   | { type: "sync-linear" };
@@ -260,6 +269,42 @@ function parseInitiativeCommand(
       type: "update-prd",
       name: prdMatch[1],
       prdLink: prdMatch[2].trim().replace(/^<|>$/g, ""), // Remove Slack URL formatting
+    };
+  }
+
+  // Update name: initiative "Name" update name "New Name"
+  const nameMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+update\s+name\s+"([^"]+)"$/i
+  );
+  if (nameMatch) {
+    return {
+      type: "update-name",
+      name: nameMatch[1],
+      newName: nameMatch[2],
+    };
+  }
+
+  // Update description: initiative "Name" update description "New Description"
+  const descMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+update\s+description\s+"([^"]+)"$/is
+  );
+  if (descMatch) {
+    return {
+      type: "update-description",
+      name: descMatch[1],
+      newDescription: descMatch[2],
+    };
+  }
+
+  // Update owner: initiative "Name" update owner @user
+  const ownerMatch = cleaned.match(
+    /^initiative\s+"([^"]+)"\s+update\s+owner\s+<@(\w+)>$/i
+  );
+  if (ownerMatch) {
+    return {
+      type: "update-owner",
+      name: ownerMatch[1],
+      newOwner: ownerMatch[2],
     };
   }
 
@@ -630,6 +675,36 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
             env,
             initCommand.name,
             initCommand.prdLink,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "update-name": {
+          const result = await updateInitiativeName(
+            env,
+            initCommand.name,
+            initCommand.newName,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "update-description": {
+          const result = await updateInitiativeDescription(
+            env,
+            initCommand.name,
+            initCommand.newDescription,
+            user
+          );
+          response = result.message;
+          break;
+        }
+        case "update-owner": {
+          const result = await updateInitiativeOwner(
+            env,
+            initCommand.name,
+            initCommand.newOwner,
             user
           );
           response = result.message;

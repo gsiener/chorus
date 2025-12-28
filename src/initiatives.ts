@@ -319,6 +319,104 @@ export async function updateInitiativePrd(
 }
 
 /**
+ * Update an initiative's name
+ */
+export async function updateInitiativeName(
+  env: Env,
+  idOrName: string,
+  newName: string,
+  updatedBy: string
+): Promise<{ success: boolean; message: string }> {
+  const initiative = await getInitiative(env, idOrName);
+  if (!initiative) {
+    return { success: false, message: `Initiative "${idOrName}" not found.` };
+  }
+
+  const oldName = initiative.name;
+  const now = new Date().toISOString();
+  initiative.name = newName;
+  initiative.updatedAt = now;
+
+  // Save updated initiative
+  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
+
+  // Update index
+  const index = await getIndex(env);
+  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
+  if (metaIndex >= 0) {
+    index.initiatives[metaIndex] = toMetadata(initiative);
+    await saveIndex(env, index);
+  }
+
+  return {
+    success: true,
+    message: `Renamed "${oldName}" to "${newName}".`,
+  };
+}
+
+/**
+ * Update an initiative's description
+ */
+export async function updateInitiativeDescription(
+  env: Env,
+  idOrName: string,
+  newDescription: string,
+  updatedBy: string
+): Promise<{ success: boolean; message: string }> {
+  const initiative = await getInitiative(env, idOrName);
+  if (!initiative) {
+    return { success: false, message: `Initiative "${idOrName}" not found.` };
+  }
+
+  const now = new Date().toISOString();
+  initiative.description = newDescription;
+  initiative.updatedAt = now;
+
+  // Save updated initiative
+  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
+
+  return {
+    success: true,
+    message: `Updated description for "${initiative.name}".`,
+  };
+}
+
+/**
+ * Update an initiative's owner
+ */
+export async function updateInitiativeOwner(
+  env: Env,
+  idOrName: string,
+  newOwner: string,
+  updatedBy: string
+): Promise<{ success: boolean; message: string }> {
+  const initiative = await getInitiative(env, idOrName);
+  if (!initiative) {
+    return { success: false, message: `Initiative "${idOrName}" not found.` };
+  }
+
+  const now = new Date().toISOString();
+  initiative.owner = newOwner;
+  initiative.updatedAt = now;
+
+  // Save updated initiative
+  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
+
+  // Update index (owner changed)
+  const index = await getIndex(env);
+  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
+  if (metaIndex >= 0) {
+    index.initiatives[metaIndex] = toMetadata(initiative);
+    await saveIndex(env, index);
+  }
+
+  return {
+    success: true,
+    message: `Updated owner of "${initiative.name}" to <@${newOwner}>.`,
+  };
+}
+
+/**
  * Add an expected metric to an initiative
  */
 export async function addInitiativeMetric(
