@@ -138,6 +138,29 @@ describe("Worker", () => {
     expect(await response.text()).toBe("OK");
     expect(mockCtx.waitUntil).not.toHaveBeenCalled();
   });
+
+  it("handles help command and triggers background processing", async () => {
+    const body = JSON.stringify({
+      type: "event_callback",
+      event_id: "EvHelp1",
+      event_time: 1234567890,
+      event: {
+        type: "app_mention",
+        user: "U123",
+        text: "<@U_BOT> help",
+        channel: "C123",
+        ts: "1234.5678",
+      },
+    });
+    const request = await createSignedRequest(body, mockEnv.SLACK_SIGNING_SECRET);
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("OK");
+    // Help command should be processed in background via waitUntil
+    expect(mockCtx.waitUntil).toHaveBeenCalled();
+  });
 });
 
 describe("Docs API", () => {

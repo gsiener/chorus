@@ -77,33 +77,36 @@ async function isDuplicateEvent(eventId: string, env: Env): Promise<boolean> {
   return false;
 }
 
-const HELP_TEXT = `*Chorus* — your chief of staff for product leadership.
+const HELP_TEXT = `*Chorus* — your AI chief of staff for product leadership.
 
-*Search:*
-• \`@Chorus search "query"\` — search initiatives, docs, and PRDs
+*Quick Start:*
+Just ask me anything about your product strategy, roadmap, or initiatives in natural language! I have context on your knowledge base and can help answer questions.
 
-*Initiatives:*
-• \`@Chorus initiatives\` — list all initiatives
-• \`@Chorus initiatives sync linear\` — import projects from Linear
+*Search Everything:*
+• \`@Chorus search "query"\` — find initiatives, docs, and PRDs
+
+*Track Initiatives:*
+• \`@Chorus initiatives\` — see all initiatives at a glance
+• \`@Chorus initiative "Name" show\` — view full details
 • \`@Chorus initiative add "Name" - owner @user - description: text\`
-• \`@Chorus initiative "Name" show\` — view details
 • \`@Chorus initiative "Name" update status [proposed|active|paused|completed|cancelled]\`
-• \`@Chorus initiative "Name" update prd [url]\`
+• \`@Chorus initiative "Name" update prd [url]\` — link your PRD
 • \`@Chorus initiative "Name" add metric: [gtm|product] [name] - target: [target]\`
 • \`@Chorus initiative "Name" remove\`
+• \`@Chorus initiatives sync linear\` — import from Linear
 
 *Knowledge Base:*
-• \`@Chorus docs\` — list documents
-• \`@Chorus add doc "Title": content\`
+• \`@Chorus docs\` — list all documents
+• \`@Chorus add doc "Title": content\` — add inline
 • \`@Chorus remove doc "Title"\`
-• \`@Chorus backfill docs\` — reindex all documents for semantic search
-• Upload files to add them as docs
+• Upload files (text, markdown, JSON, CSV) to add them as docs
+• \`@Chorus backfill docs\` — reindex for semantic search
 
-*Tips:*
-• Ask me about product strategy, roadmap, or initiatives
-• I'll gently remind you about missing PRDs or metrics
-
-👍 or 👎 my responses to help me improve!`;
+*Pro Tips:*
+• I remember context within threads — just keep chatting!
+• I'll nudge you about missing PRDs or metrics when relevant
+• Initiative owners get weekly DM check-ins
+• 👍 or 👎 my responses to help me improve`;
 
 /**
  * Parse doc commands from message text
