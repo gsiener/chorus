@@ -290,6 +290,43 @@ export async function getKnowledgeBase(env: Env): Promise<string | null> {
 }
 
 /**
+ * Get a random document from the knowledge base
+ * Returns the full document content with title
+ */
+export async function getRandomDocument(
+  env: Env
+): Promise<{ success: boolean; title?: string; content?: string; message: string }> {
+  const index = await getIndex(env);
+
+  if (index.documents.length === 0) {
+    return {
+      success: false,
+      message: "The knowledge base is empty. Add some documents first!",
+    };
+  }
+
+  // Pick a random document
+  const randomIndex = Math.floor(Math.random() * index.documents.length);
+  const doc = index.documents[randomIndex];
+  const key = titleToKey(doc.title);
+  const content = await env.DOCS_KV.get(key);
+
+  if (!content) {
+    return {
+      success: false,
+      message: `Couldn't retrieve document "${doc.title}".`,
+    };
+  }
+
+  return {
+    success: true,
+    title: doc.title,
+    content,
+    message: `🎲 *${doc.title}*\n\n${content}`,
+  };
+}
+
+/**
  * Backfill all existing documents into the vector index
  * Used for migrating documents added before semantic search was enabled
  */

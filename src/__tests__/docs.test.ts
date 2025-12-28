@@ -5,6 +5,7 @@ import {
   listDocuments,
   getKnowledgeBase,
   backfillDocuments,
+  getRandomDocument,
 } from "../docs";
 import type { Env } from "../types";
 
@@ -323,5 +324,59 @@ describe("backfillDocuments", () => {
 
     expect(result.failed).toBe(1);
     expect(result.message).toContain("content not found");
+  });
+});
+
+describe("getRandomDocument", () => {
+  let mockKV: ReturnType<typeof createMockKV>;
+  let mockEnv: Env;
+
+  beforeEach(() => {
+    mockKV = createMockKV();
+    mockEnv = createMockEnv(mockKV);
+    vi.clearAllMocks();
+  });
+
+  it("returns error when knowledge base is empty", async () => {
+    const result = await getRandomDocument(mockEnv);
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("empty");
+  });
+
+  it("returns a random document from the knowledge base", async () => {
+    await addDocument(mockEnv, "Doc One", "Content for doc one", "U123");
+    await addDocument(mockEnv, "Doc Two", "Content for doc two", "U456");
+
+    const result = await getRandomDocument(mockEnv);
+
+    expect(result.success).toBe(true);
+    expect(result.title).toBeDefined();
+    expect(result.content).toBeDefined();
+    expect(["Doc One", "Doc Two"]).toContain(result.title);
+    expect(result.message).toContain("🎲");
+    expect(result.message).toContain(result.title!);
+  });
+
+  it("returns the only document when knowledge base has one", async () => {
+    await addDocument(mockEnv, "Only Doc", "The only content", "U123");
+
+    const result = await getRandomDocument(mockEnv);
+
+    expect(result.success).toBe(true);
+    expect(result.title).toBe("Only Doc");
+    expect(result.content).toBe("The only content");
+  });
+
+  it("handles missing content gracefully", async () => {
+    // Corrupt the index - add entry without content
+    mockKV._store.set("docs:index", JSON.stringify({
+      documents: [{ title: "Ghost Doc", addedBy: "U123", addedAt: "2024-01-01", charCount: 100 }],
+    }));
+
+    const result = await getRandomDocument(mockEnv);
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("Couldn't retrieve");
   });
 });

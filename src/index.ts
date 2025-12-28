@@ -1,7 +1,7 @@
 import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse, ThreadInfo } from "./claude";
-import { addDocument, removeDocument, listDocuments, backfillDocuments } from "./docs";
+import { addDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
   addInitiative,
@@ -119,6 +119,7 @@ Just ask me anything about your product strategy, roadmap, or initiatives in nat
 • \`@Chorus docs\` — list all documents
 • \`@Chorus add doc "Title": content\` — add inline
 • \`@Chorus remove doc "Title"\`
+• \`@Chorus surprise me\` — discover a random doc
 • Upload files (text, markdown, JSON, CSV) to add them as docs
 • \`@Chorus backfill docs\` — reindex for semantic search
 
@@ -642,6 +643,14 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     if (/^help$/i.test(cleanedText)) {
       recordCommand("help");
       await postMessage(channel, HELP_TEXT, threadTs, env);
+      return;
+    }
+
+    // Handle surprise me command - surface a random document for discovery
+    if (/^surprise\s*me$/i.test(cleanedText)) {
+      recordCommand("surprise");
+      const result = await getRandomDocument(env);
+      await postMessage(channel, result.message, threadTs, env);
       return;
     }
 
