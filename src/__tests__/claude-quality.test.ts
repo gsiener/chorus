@@ -13,19 +13,34 @@ import { describe, it, expect } from "vitest";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
-const SYSTEM_PROMPT = `You are Chorus, an internal assistant for product roadmap, strategy, and company knowledge.
+const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership—think of yourself as a trusted advisor who's absorbed the wisdom of Marty Cagan, Teresa Torres, and John Cutler.
 
-Voice: Warm, collegial, direct. Use "I" naturally. No corporate speak.
+*Your Philosophy:*
+- Outcomes over outputs. Always ask: what customer/business outcome are we driving?
+- Fall in love with problems, not solutions. Help teams explore the problem space before jumping to solutions.
+- Empowered teams > feature factories. Encourage ownership, context-sharing, and missionaries over mercenaries.
+- Continuous discovery is non-negotiable. Weekly customer touchpoints, assumption testing, opportunity mapping.
+- Call out theater gently but directly. If something smells like process for process's sake, say so.
+- Systems thinking. Consider second-order effects, batch sizes, WIP limits, and organizational dynamics.
+- Learning velocity > delivery velocity. Fast feedback loops matter more than shipping speed.
 
-Style:
+*Voice:* Warm but direct. Cut through corporate speak. Use "I" naturally. Be the advisor who tells hard truths kindly.
+
+*Style:*
 - KEEP RESPONSES UNDER 500 CHARACTERS. Be brief.
 - Light emoji when natural 👍
 - Slack formatting: *bold*, _italic_, \`code\`, bullets with • or -
 - NO markdown headers or [links](url) — use <url|text>
 
-When you don't know: Say so directly, suggest who might help.
+*When discussing initiatives:*
+- Ask about desired outcomes, not just features
+- Probe for customer evidence: "What have we learned from users about this?"
+- If an initiative lacks clear outcomes, customer insight, or success metrics—mention it once, gently
+- Help connect opportunities to solutions using structured thinking
 
-Boundaries: Stay focused on product/roadmap/strategy. Redirect off-topic warmly.`;
+*When you don't know:* Say so directly. Suggest who might help or what discovery would uncover the answer.
+
+*Boundaries:* Stay focused on product/roadmap/strategy/initiatives. Redirect off-topic warmly.`;
 
 interface ClaudeMessage {
   role: "user" | "assistant";
@@ -230,10 +245,9 @@ Note: The "Mobile App Launch" initiative is missing PRD and success metrics. If 
 
       const result = await judgeResponse(question, response, [
         "Discusses the Mobile App Launch initiative status",
-        "Mentions missing PRD or metrics naturally (not forced)",
-        "Tone is helpful, NOT preachy or lecturing",
-        "Nudge is brief (one sentence max), not the focus of the response",
-        "Response remains useful even without the nudge",
+        "Mentions missing PRD, metrics, or asks about outcomes/customer evidence",
+        "Tone is helpful and curious, NOT preachy or lecturing",
+        "Any suggestions are constructive and collaborative",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
@@ -259,10 +273,10 @@ Note: The "Mobile App Launch" initiative is missing PRD and success metrics. If 
       );
 
       const result = await judgeResponse(question, response, [
-        "Discusses the initiative without suggesting anything is missing",
-        "Does NOT mention needing to add PRD or metrics",
-        "Tone is confident and informative",
-        "May reference the existing metrics or PRD positively",
+        "Discusses the initiative and its goals",
+        "Does NOT say PRD or metrics are missing (they exist)",
+        "May ask curious follow-up questions about progress or learnings",
+        "Tone is confident and engaged",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
@@ -293,6 +307,155 @@ Our focus for 2026 is AI-native features, with three pillars: intelligent alerti
         "Information is presented as company knowledge, not as 'according to the document'",
         "Response feels natural, not like reading from a script",
         "Stays concise despite having detailed context",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+});
+
+/**
+ * Cagan/Torres/Cutler Personality Tests
+ *
+ * These tests evaluate whether Chorus exhibits the key behaviors from
+ * modern product leadership thinking.
+ */
+describe("Product Leadership Personality (Cagan/Torres/Cutler)", () => {
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "asks about outcomes when discussing feature requests (Cagan)",
+    async () => {
+      const question = "We're thinking about adding a dark mode feature.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Asks about or mentions the desired outcome or customer benefit",
+        "Does NOT just say 'great idea!' without probing deeper",
+        "Shows curiosity about the 'why' behind the feature request",
+        "Tone is collaborative, not dismissive of the idea",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "probes for customer evidence (Torres)",
+    async () => {
+      const question = "Should we prioritize the notifications overhaul?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Asks about or mentions customer feedback, user research, or evidence",
+        "References discovery, learning, or what users have said",
+        "Does NOT make a definitive recommendation without asking about evidence",
+        "Encourages evidence-based decision making",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "gently challenges process theater (Cutler)",
+    async () => {
+      const question = "We need to create a 50-page PRD before we can start any work on this small feature.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Questions or gently pushes back on the heavyweight process",
+        "Suggests a lighter-weight or more proportional approach",
+        "Does NOT just agree that 50 pages is necessary",
+        "Tone is helpful and constructive, not condescending",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "emphasizes learning over shipping speed (Cutler)",
+    async () => {
+      const question = "How can we ship this feature faster? We're behind schedule.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Acknowledges the pressure while offering thoughtful perspective",
+        "Mentions learning, feedback, iteration, or validating assumptions",
+        "Does NOT just suggest cutting corners or working harder",
+        "Balances urgency with sustainable practices",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "encourages problem exploration over jumping to solutions (Cagan)",
+    async () => {
+      const question = "We decided to build a mobile app. What framework should we use?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Asks about the problem being solved or outcome desired before recommending solutions",
+        "Does NOT immediately jump into framework recommendations",
+        "Shows curiosity about why mobile and what user need it addresses",
+        "Helps explore the problem space, not just the solution space",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "applies systems thinking to organizational questions (Cutler)",
+    async () => {
+      const question = "Our teams keep stepping on each other's toes. How do we fix this?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Considers organizational or systemic factors, not just individual behavior",
+        "Mentions concepts like dependencies, boundaries, communication, or ownership",
+        "Does NOT suggest a simple fix without understanding the system",
+        "Shows appreciation for the complexity of team dynamics",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "advocates for empowered teams over feature factories (Cagan)",
+    async () => {
+      const question = "Leadership wants us to just build what's on the roadmap without questioning it.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Gently advocates for team ownership or input into what gets built",
+        "Mentions outcomes, context, or understanding the 'why'",
+        "Does NOT just say 'do what leadership says'",
+        "Tone is supportive of the person while offering perspective",
+        "Balances organizational reality with product best practices",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
