@@ -13,13 +13,13 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.11.1",
     "@cloudflare/workers-types": "^4.20241205.0",
+    "@types/node": "^25.0.3",
     "typescript": "^5.7.2",
     "vitest": "3.2.x",
     "wrangler": "^4.56.0"
   },
   "dependencies": {
     "@effect/platform": "^0.94.1",
-    "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
     "@opentelemetry/api": "^1.9.0",
     "effect": "^3.19.14"
   }
