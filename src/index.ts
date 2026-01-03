@@ -22,8 +22,23 @@ import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
-import { recordCommand, recordError } from "./telemetry";
+import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
+import { recordCommand, recordError, recordFeedback } from "./telemetry";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
+
+// OpenTelemetry configuration for Honeycomb export
+const otelConfig: ResolveConfigFn = (env: Env, _trigger) => ({
+  exporter: {
+    url: "https://api.honeycomb.io/v1/traces",
+    headers: {
+      "x-honeycomb-team": env.HONEYCOMB_API_KEY,
+      "x-honeycomb-dataset": "chorus",
+    },
+  },
+  service: {
+    name: "chorus",
+  },
+});
 
 // Rate limiting configuration (per user, per minute)
 const RATE_LIMIT_WINDOW_SECONDS = 60;
@@ -555,8 +570,8 @@ export const handler = {
   /**
    * Handle scheduled cron triggers (weekly check-ins)
    */
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log("Running scheduled check-ins at", new Date(event.scheduledTime).toISOString());
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log("Running scheduled check-ins at", new Date(controller.scheduledTime).toISOString());
     ctx.waitUntil(sendWeeklyCheckins(env));
   },
 
@@ -621,8 +636,9 @@ export const handler = {
   },
 };
 
-// Default export for Cloudflare Workers
-export default handler;
+// Default export wrapped with OpenTelemetry instrumentation
+// This sends traces directly to Honeycomb with full custom span attribute support
+export default instrument(handler, otelConfig);
 
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
   const event = payload.event as SlackAppMentionEvent;
@@ -943,19 +959,25 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     await addReaction(channel, thinkingTs, "thumbsup", env);
     await addReaction(channel, thinkingTs, "thumbsdown", env);
 
-    // Record gen_ai attributes on span and log metrics
+    // Record gen_ai attributes on span using OTel semantic conventions
     const genAiSpan = trace.getActiveSpan();
     genAiSpan?.setAttributes({
       "gen_ai.response.cache_hit": result.cached,
       "gen_ai.usage.input_tokens": result.inputTokens,
       "gen_ai.usage.output_tokens": result.outputTokens,
     });
-    console.log(JSON.stringify({
-      event: "response_complete",
+    // Add span event for the completion (OTel best practice for point-in-time events)
+    genAiSpan?.addEvent("response_complete", {
       "gen_ai.response.cache_hit": result.cached,
       "gen_ai.usage.input_tokens": result.inputTokens,
       "gen_ai.usage.output_tokens": result.outputTokens,
-    }));
+    });
+    // Structured log for Cloudflare Workers observability (don't stringify)
+    console.info("response_complete", {
+      "gen_ai.response.cache_hit": result.cached,
+      "gen_ai.usage.input_tokens": result.inputTokens,
+      "gen_ai.usage.output_tokens": result.outputTokens,
+    });
   } catch (error) {
     console.error("Error handling mention:", error);
     if (error instanceof Error) {
@@ -978,13 +1000,6 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
   const event = payload.event as SlackReactionAddedEvent;
   const { reaction, user, item } = event;
 
-  // Add Slack context to the current trace span
-  const span = trace.getActiveSpan();
-  span?.setAttribute("slack.user_id", user);
-  span?.setAttribute("slack.channel", item.channel);
-  span?.setAttribute("slack.event_type", "reaction_added");
-  span?.setAttribute("slack.reaction", reaction);
-
   // Only track thumbsup/thumbsdown reactions
   if (reaction !== "+1" && reaction !== "-1" && reaction !== "thumbsup" && reaction !== "thumbsdown") {
     return;
@@ -1000,22 +1015,20 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
 
     const feedback = reaction === "+1" || reaction === "thumbsup" ? "positive" : "negative";
 
-    // Record feedback on span for tracing
-    span?.setAttribute("chorus.feedback", feedback);
-    span?.setAttribute("chorus.feedback.message_ts", item.ts);
-
-    // Log feedback for Honeycomb (via Workers observability)
-    console.log(JSON.stringify({
-      event: "feedback",
-      "chorus.feedback": feedback,
-      "slack.reaction": reaction,
-      "slack.user_id": user,
-      "slack.channel": item.channel,
-      "chorus.feedback.message_ts": item.ts,
-    }));
+    // Record feedback using OTel best practices
+    // This uses span events, span attributes, and structured logging
+    recordFeedback(feedback, {
+      reaction,
+      userId: user,
+      channel: item.channel,
+      messageTs: item.ts,
+    });
 
   } catch (error) {
     console.error("Error handling reaction:", error);
+    if (error instanceof Error) {
+      recordError(error, "handleReaction");
+    }
   }
 }
 

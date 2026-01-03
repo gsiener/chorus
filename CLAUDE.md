@@ -11,11 +11,16 @@ We use **Linear** to track tasks:
 2. Reference the issue ID (e.g., PDD-28) in commits
 
 **Finishing a task:**
-1. Commit and push changes
+1. Commit changes (but batch pushes - see below)
 2. Move issue to "In Review"
 3. Verify/confirm the fix works
 4. If confirmed → move to "Done"
 5. If can't confirm → leave in "In Review" for manual verification
+
+**Git push policy:**
+- **Batch commits before pushing** - Quality tests run on push and cost money
+- Commit frequently, but push less often (batch multiple commits together)
+- Only push when explicitly asked or when a logical batch of work is complete
 
 **Creating issues:**
 - Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)

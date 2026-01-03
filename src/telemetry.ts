@@ -275,3 +275,70 @@ export function recordCommand(command: string): void {
 
   span.setAttribute("chorus.command", command);
 }
+
+/**
+ * Record user feedback (thumbs up/down) on bot responses
+ * Uses OTel span attributes and events (preferred for tracing)
+ *
+ * @param feedback - "positive" for thumbsup, "negative" for thumbsdown
+ * @param attributes - Additional context about the feedback
+ */
+export function recordFeedback(
+  feedback: "positive" | "negative",
+  attributes: {
+    reaction: string;
+    userId: string;
+    channel: string;
+    messageTs: string;
+  }
+): void {
+  const span = getActiveSpan();
+
+  // Set span attributes for filtering/grouping in traces (primary method)
+  span?.setAttributes({
+    "chorus.feedback": feedback,
+    "chorus.feedback.message_ts": attributes.messageTs,
+    "slack.event_type": "reaction_added",
+    "slack.reaction": attributes.reaction,
+    "slack.user_id": attributes.userId,
+    "slack.channel": attributes.channel,
+  });
+
+  // Add span event for the feedback occurrence (OTel best practice)
+  span?.addEvent("feedback_received", {
+    "chorus.feedback": feedback,
+    "chorus.feedback.message_ts": attributes.messageTs,
+    "slack.reaction": attributes.reaction,
+    "slack.user_id": attributes.userId,
+    "slack.channel": attributes.channel,
+  });
+
+  // Fallback structured log for Cloudflare Workers observability
+  // (in case span attributes aren't exported by workers-observability)
+  console.info("feedback", {
+    "chorus.feedback": feedback,
+    "chorus.feedback.message_ts": attributes.messageTs,
+    "slack.reaction": attributes.reaction,
+    "slack.user_id": attributes.userId,
+    "slack.channel": attributes.channel,
+  });
+}
+
+/**
+ * Emit a structured log event with attributes
+ * Uses console methods that Cloudflare Workers observability can parse
+ *
+ * @param eventName - Name of the event (appears in 'body' or 'name')
+ * @param attributes - Key-value pairs to log as separate fields
+ * @param level - Log level (info, warn, error)
+ */
+export function emitLogEvent(
+  eventName: string,
+  attributes: Record<string, string | number | boolean>,
+  level: "info" | "warn" | "error" = "info"
+): void {
+  const logFn = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
+
+  // Cloudflare Workers observability parses object arguments as attributes
+  logFn(eventName, attributes);
+}
