@@ -29,20 +29,23 @@ const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership�
 *Style:*
 - KEEP RESPONSES UNDER 500 CHARACTERS. Be brief but substantive.
 - Light emoji when natural 👍
-- Slack formatting: *bold*, _italic*, \`code\`, bullets with • or -
+- Slack formatting: *bold*, _italic_, \`code\`, bullets with • or -
 - NO markdown headers or [links](url) — use <url|text>
 
 *CRITICAL - Lead with your opinion:*
-- ALWAYS give your opinion FIRST. Don't ask "what do you think?" — that's lazy.
-- State your view clearly: "I think...", "My take is...", "I'd recommend..."
-- NEVER end a response by turning the question back to the user.
+- ALWAYS give your opinion FIRST. State your view clearly: "I think...", "My take is...", "I'd recommend..."
 - Ground opinions in product principles and any knowledge base context you have.
 - It's okay to be wrong. A clear opinion that can be debated is more valuable than a vague overview.
-- You MAY ask ONE clarifying question AFTER giving your opinion, but opinion comes first.
+
+*NEVER ASK QUESTIONS:*
+- DO NOT end responses with questions. Ever.
+- DO NOT ask "What do you think?" or "Are you exploring X?" or "What problem are you solving?"
+- Instead of asking, make a recommendation: "I'd start by..." or "The key consideration is..."
+- If you need more context, say what you'd recommend for different scenarios rather than asking.
 
 *When discussing initiatives:*
-- Share your perspective on the initiative, then ask about outcomes if relevant
-- If an initiative lacks clear outcomes or metrics—state your concern directly, don't just ask about it
+- Share your perspective on the initiative directly
+- If an initiative lacks clear outcomes or metrics—state your concern as a recommendation, don't ask about it
 
 *When you don't know:* Say so directly. Suggest who might help or what discovery would uncover the answer.
 
@@ -331,40 +334,50 @@ Our focus for 2026 is AI-native features, with three pillars: intelligent alerti
  */
 describe.concurrent("Product Leadership Personality (Cagan/Torres/Cutler)", () => {
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "asks about outcomes when discussing feature requests (Cagan)",
+    "mentions outcomes when discussing feature requests (Cagan) - NO questions",
     async () => {
       const question = "We're thinking about adding a dark mode feature.";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
-        "Asks about or mentions the desired outcome or customer benefit",
-        "Does NOT just say 'great idea!' without probing deeper",
-        "Shows curiosity about the 'why' behind the feature request",
-        "Tone is collaborative, not dismissive of the idea",
+        "Mentions the desired outcome, customer benefit, or job-to-be-done",
+        "Does NOT just say 'great idea!' without deeper guidance",
+        "Provides a recommendation on how to approach the feature decision",
+        "Does NOT ask questions - gives advice directly",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
   );
 
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "probes for customer evidence (Torres)",
+    "recommends evidence-based approach (Torres) - NO questions",
     async () => {
       const question = "Should we prioritize the notifications overhaul?";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
-        "Asks about or mentions customer feedback, user research, or evidence",
-        "References discovery, learning, or what users have said",
-        "Does NOT make a definitive recommendation without asking about evidence",
-        "Encourages evidence-based decision making",
+        "Mentions customer feedback, user research, or evidence as important",
+        "Recommends checking discovery or customer conversations before deciding",
+        "Takes a stance (e.g., 'I'd hold off until...' or 'Evidence should drive this')",
+        "Does NOT ask questions - provides guidance directly",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
@@ -411,20 +424,25 @@ describe.concurrent("Product Leadership Personality (Cagan/Torres/Cutler)", () =
   );
 
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "encourages problem exploration over jumping to solutions (Cagan)",
+    "encourages problem exploration over jumping to solutions (Cagan) - NO questions",
     async () => {
       const question = "We decided to build a mobile app. What framework should we use?";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
-        "Asks about the problem being solved or outcome desired before recommending solutions",
-        "Does NOT immediately jump into framework recommendations",
-        "Shows curiosity about why mobile and what user need it addresses",
-        "Helps explore the problem space, not just the solution space",
+        "Mentions the importance of understanding the problem or outcome before choosing tools",
+        "Does NOT immediately jump into framework recommendations without context",
+        "Recommends clarifying the user need or job-to-be-done first",
+        "Does NOT ask questions - provides guidance on approach directly",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
@@ -478,49 +496,59 @@ describe.concurrent("Product Leadership Personality (Cagan/Torres/Cutler)", () =
  * These tests evaluate whether Chorus gives clear opinions instead of
  * deflecting with vague overviews or asking the user what they think.
  */
-describe.concurrent("Opinionated Responses", () => {
+describe.concurrent("Opinionated Responses (No Questions)", () => {
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "gives a clear opinion when asked directly",
+    "gives a clear opinion when asked directly - NO questions",
     async () => {
       const question = "What do you think about using OKRs for tracking product work?";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
         "Gives a CLEAR OPINION with a definite stance (e.g., 'I think...' or 'In my view...')",
-        "Does NOT deflect with 'it depends' or 'what do you think?'",
+        "Does NOT ask ANY questions - no '?' anywhere in response",
         "Supports the opinion with reasoning or product principles",
         "Response is substantive, not a vague overview",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
   );
 
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "takes a stance on prioritization questions",
+    "takes a stance on prioritization - NO questions",
     async () => {
       const question = "Should we focus on new features or tech debt? What's your take?";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
         "Takes a clear position rather than listing pros and cons without a recommendation",
-        "Does NOT just say 'both are important' without guidance",
+        "Does NOT ask ANY questions - no '?' anywhere in response",
         "Provides a framework or principle to help decide",
-        "Does NOT ask 'what do you think?' back to the user",
+        "Makes a recommendation, does not turn it back to the user",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
   );
 
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "provides opinionated guidance using knowledge base context",
+    "uses knowledge base context to give opinion - NO questions",
     async () => {
       const systemPromptWithKB = `${SYSTEM_PROMPT}
 
@@ -535,35 +563,45 @@ We've committed to focusing on enterprise customers this quarter. Key bets: SSO 
         systemPromptWithKB
       );
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
         "References the knowledge base context (churn data, Q1 priorities)",
         "Takes a clear stance on whether to deprioritize SSO",
-        "Uses the data to support the opinion, not just recite it",
-        "Does NOT just present the info and ask 'what do you think?'",
+        "Does NOT ask ANY questions - no '?' anywhere in response",
+        "Uses the data to make a recommendation, not just present it",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
   );
 
   it.skipIf(!ANTHROPIC_API_KEY)(
-    "avoids wishy-washy non-answers",
+    "gives recommendation, not wishy-washy - NO questions",
     async () => {
       const question = "Is it better to do weekly or bi-weekly sprints? What's your recommendation?";
       const response = await callClaude([{ role: "user", content: question }]);
 
+      // Hard check: response must not contain question marks
+      const hasQuestion = response.includes("?");
+      console.log(`Response contains '?': ${hasQuestion}`);
+
       const result = await judgeResponse(question, response, [
         "Gives a recommendation rather than 'both can work'",
-        "Does NOT end with 'what do you think works best for your team?'",
+        "Does NOT ask ANY questions - no '?' anywhere in response",
         "Provides reasoning for the recommendation",
         "Response feels like advice from an expert, not a Wikipedia summary",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
       console.log(`Response: ${response}`);
+      expect(hasQuestion).toBe(false);
       expect(result.pass).toBe(true);
     },
     30000
