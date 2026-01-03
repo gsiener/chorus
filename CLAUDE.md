@@ -21,13 +21,20 @@ We use **Linear** to track tasks:
 - Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
 
 **Linear API access:**
-- API key is in `~/.env` as `LINEAR_API_KEY`
+- API key is in `.env` as `LINEAR_API_KEY` (use `source .env` first)
 - Use the GraphQL API at `https://api.linear.app/graphql`
 - Team ID for PDD Leadership: `daa91240-92e1-4a78-8cc7-a53684a431b1`
 
+Workflow state IDs (PDD Leadership):
+- Backlog: `fe855cf8-1c24-48e2-98c7-347a001edf35`
+- Todo: `c15f7e13-c1e7-4d44-9baa-5a9eeb73c6a9`
+- In Progress: `c9ac7a4d-ba12-4a55-96c8-62674a1fe91f`
+- In Review: `5041ec12-a4f2-4d38-be9e-5bb7345341c5`
+- Done: `d75b66b4-4d28-4967-9b77-fef9b3d8c4fe`
+
 Example to create an issue:
 ```bash
-curl -s -X POST https://api.linear.app/graphql \
+source .env && curl -s -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
   -H "Authorization: $LINEAR_API_KEY" \
   -d '{
@@ -40,6 +47,16 @@ curl -s -X POST https://api.linear.app/graphql \
         "projectId": "d581ee59-765e-4257-83f8-44e75620bac6"
       }
     }
+  }'
+```
+
+Example to update issue state (use issue UUID, not identifier):
+```bash
+source .env && curl -s -X POST https://api.linear.app/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $LINEAR_API_KEY" \
+  -d '{
+    "query": "mutation { issueUpdate(id: \"ISSUE_UUID\", input: { stateId: \"STATE_ID\" }) { success } }"
   }'
 ```
 
