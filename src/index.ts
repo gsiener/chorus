@@ -23,7 +23,17 @@ import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
-import { recordCommand, recordError, recordFeedback } from "./telemetry";
+import {
+  recordCommand,
+  recordError,
+  recordFeedback,
+  recordRequestContext,
+  recordThreadContext,
+  recordSearchResults,
+  recordClaudeResponse,
+  recordFileProcessing,
+  recordRateLimit,
+} from "./telemetry";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 
 // OpenTelemetry configuration for Honeycomb export
@@ -644,13 +654,21 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
-  // Add Slack and GenAI context to the current trace span
+  // Record rich request context for wide events
+  recordRequestContext({
+    userId: user,
+    channel,
+    messageLength: text.length,
+    isThread: !!thread_ts,
+    threadTs: thread_ts,
+    hasFiles: !!(files && files.length > 0),
+    fileCount: files?.length ?? 0,
+    eventType: "app_mention",
+  });
+
+  // Add GenAI context to the current trace span
   const span = trace.getActiveSpan();
   span?.setAttributes({
-    // Slack context
-    "slack.user_id": user,
-    "slack.channel": channel,
-    "slack.event_type": "app_mention",
     // GenAI context (OTel semantic conventions)
     "gen_ai.operation.name": "chat",
     "gen_ai.system": "anthropic",
@@ -683,7 +701,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       recordCommand("search");
 
       // Rate limit search commands
-      if (await isRateLimited(user, "search", env)) {
+      const searchLimited = await isRateLimited(user, "search", env);
+      recordRateLimit({ userId: user, action: "search", wasLimited: searchLimited });
+      if (searchLimited) {
         await postMessage(
           channel,
           "You're searching too quickly. Please wait a moment before trying again.",
@@ -700,6 +720,15 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
         searchDocuments(query, env, 5),
         searchInitiatives(env, query, 5),
       ]);
+
+      // Record search results for observability
+      recordSearchResults({
+        query,
+        docResultsCount: docResults.length,
+        initiativeResultsCount: initiativeResults.length,
+        topDocScore: docResults[0]?.score,
+        topInitiativeScore: initiativeResults[0]?.score,
+      });
 
       const sections: string[] = [];
 
@@ -748,12 +777,33 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
             const title = titleFromFilename(extracted.filename);
             const result = await addDocument(env, title, extracted.content, user);
             results.push(result.message);
+            recordFileProcessing({
+              fileName: file.name,
+              fileType: file.mimetype,
+              fileSizeKb: Math.round((file.size || 0) / 1024),
+              extractedLength: extracted.content.length,
+              success: true,
+            });
           } else {
             results.push(`Couldn't extract text from "${file.name}" (unsupported format or empty).`);
+            recordFileProcessing({
+              fileName: file.name,
+              fileType: file.mimetype,
+              fileSizeKb: Math.round((file.size || 0) / 1024),
+              success: false,
+              errorMessage: "unsupported format or empty",
+            });
           }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           results.push(`Error processing "${file.name}": ${errMsg}`);
+          recordFileProcessing({
+            fileName: file.name,
+            fileType: file.mimetype,
+            fileSizeKb: Math.round((file.size || 0) / 1024),
+            success: false,
+            errorMessage: errMsg,
+          });
         }
       }
 
@@ -881,14 +931,18 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     if (docCommand) {
       recordCommand(`docs:${docCommand.type}`);
       // Rate limit doc commands (except list)
-      if (docCommand.type !== "list" && await isRateLimited(user, "doc", env)) {
-        await postMessage(
-          channel,
-          "You're adding documents too quickly. Please wait a minute before trying again.",
-          threadTs,
-          env
-        );
-        return;
+      if (docCommand.type !== "list") {
+        const docLimited = await isRateLimited(user, "doc", env);
+        recordRateLimit({ userId: user, action: "doc", wasLimited: docLimited });
+        if (docLimited) {
+          await postMessage(
+            channel,
+            "You're adding documents too quickly. Please wait a minute before trying again.",
+            threadTs,
+            env
+          );
+          return;
+        }
       }
 
       let response: string;
@@ -926,11 +980,22 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
     // Regular message - route to Claude
     let messages;
+    let threadMessageCount = 1;
 
     if (thread_ts) {
       // Fetch existing thread history
       const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
       messages = convertThreadToMessages(threadMessages, botUserId);
+      threadMessageCount = threadMessages.length;
+
+      // Record thread context for observability
+      const userMessages = threadMessages.filter(m => m.user !== botUserId).length;
+      const botMessages = threadMessages.filter(m => m.user === botUserId).length;
+      recordThreadContext({
+        messageCount: threadMessages.length,
+        userMessageCount: userMessages,
+        botMessageCount: botMessages,
+      });
     } else {
       // New thread - just use the current message
       messages = [
@@ -959,24 +1024,14 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     await addReaction(channel, thinkingTs, "thumbsup", env);
     await addReaction(channel, thinkingTs, "thumbsdown", env);
 
-    // Record gen_ai attributes on span using OTel semantic conventions
-    const genAiSpan = trace.getActiveSpan();
-    genAiSpan?.setAttributes({
-      "gen_ai.response.cache_hit": result.cached,
-      "gen_ai.usage.input_tokens": result.inputTokens,
-      "gen_ai.usage.output_tokens": result.outputTokens,
-    });
-    // Add span event for the completion (OTel best practice for point-in-time events)
-    genAiSpan?.addEvent("response_complete", {
-      "gen_ai.response.cache_hit": result.cached,
-      "gen_ai.usage.input_tokens": result.inputTokens,
-      "gen_ai.usage.output_tokens": result.outputTokens,
-    });
-    // Structured log for Cloudflare Workers observability (don't stringify)
-    console.info("response_complete", {
-      "gen_ai.response.cache_hit": result.cached,
-      "gen_ai.usage.input_tokens": result.inputTokens,
-      "gen_ai.usage.output_tokens": result.outputTokens,
+    // Record comprehensive Claude response context for wide events
+    recordClaudeResponse({
+      responseLength: result.text.length,
+      cached: result.cached,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      messagesCount: messages.length,
+      hasKnowledgeBase: true, // Knowledge base is always searched for context
     });
   } catch (error) {
     console.error("Error handling mention:", error);

@@ -277,6 +277,184 @@ export function recordCommand(command: string): void {
 }
 
 /**
+ * Record rich request context for wide events (call at start of request handling)
+ */
+export function recordRequestContext(context: {
+  // Slack message context
+  userId: string;
+  channel: string;
+  messageLength: number;
+  isThread: boolean;
+  threadTs?: string;
+  hasFiles: boolean;
+  fileCount: number;
+  // Event type
+  eventType: "app_mention" | "reaction_added" | "scheduled";
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    // User context
+    "slack.user_id": context.userId,
+    "slack.channel": context.channel,
+    "slack.event_type": context.eventType,
+    // Message context
+    "slack.message.length": context.messageLength,
+    "slack.message.has_files": context.hasFiles,
+    "slack.message.file_count": context.fileCount,
+    // Thread context
+    "slack.is_thread": context.isThread,
+  });
+
+  if (context.threadTs) {
+    span.setAttribute("slack.thread_ts", context.threadTs);
+  }
+}
+
+/**
+ * Record thread context after fetching thread messages
+ */
+export function recordThreadContext(context: {
+  messageCount: number;
+  userMessageCount: number;
+  botMessageCount: number;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "slack.thread.message_count": context.messageCount,
+    "slack.thread.user_message_count": context.userMessageCount,
+    "slack.thread.bot_message_count": context.botMessageCount,
+  });
+}
+
+/**
+ * Record search results context
+ */
+export function recordSearchResults(context: {
+  query: string;
+  docResultsCount: number;
+  initiativeResultsCount: number;
+  topDocScore?: number;
+  topInitiativeScore?: number;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "chorus.search.query_length": context.query.length,
+    "chorus.search.doc_results_count": context.docResultsCount,
+    "chorus.search.initiative_results_count": context.initiativeResultsCount,
+    "chorus.search.total_results_count": context.docResultsCount + context.initiativeResultsCount,
+    "chorus.search.has_results": context.docResultsCount + context.initiativeResultsCount > 0,
+  });
+
+  if (context.topDocScore !== undefined) {
+    span.setAttribute("chorus.search.top_doc_score", context.topDocScore);
+  }
+  if (context.topInitiativeScore !== undefined) {
+    span.setAttribute("chorus.search.top_initiative_score", context.topInitiativeScore);
+  }
+}
+
+/**
+ * Record Claude response context (enhanced version)
+ */
+export function recordClaudeResponse(context: {
+  responseLength: number;
+  cached: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  messagesCount: number;
+  hasKnowledgeBase: boolean;
+  stopReason?: string;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    // Response metrics
+    "chorus.response.length": context.responseLength,
+    "chorus.response.cached": context.cached,
+    // Token metrics (OTel GenAI conventions)
+    "gen_ai.usage.input_tokens": context.inputTokens,
+    "gen_ai.usage.output_tokens": context.outputTokens,
+    "gen_ai.usage.total_tokens": context.inputTokens + context.outputTokens,
+    // Conversation context
+    "gen_ai.request.messages_count": context.messagesCount,
+    "gen_ai.request.has_knowledge_base": context.hasKnowledgeBase,
+    "gen_ai.response.cache_hit": context.cached,
+  });
+
+  if (context.stopReason) {
+    span.setAttribute("gen_ai.response.finish_reason", context.stopReason);
+  }
+
+  // Add span event for the completion
+  span.addEvent("response_complete", {
+    "chorus.response.length": context.responseLength,
+    "gen_ai.usage.input_tokens": context.inputTokens,
+    "gen_ai.usage.output_tokens": context.outputTokens,
+    "gen_ai.response.cache_hit": context.cached,
+  });
+}
+
+/**
+ * Record file processing context
+ */
+export function recordFileProcessing(context: {
+  fileName: string;
+  fileType: string;
+  fileSizeKb: number;
+  extractedLength?: number;
+  success: boolean;
+  errorMessage?: string;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "chorus.file.name": context.fileName,
+    "chorus.file.type": context.fileType,
+    "chorus.file.size_kb": context.fileSizeKb,
+    "chorus.file.success": context.success,
+  });
+
+  if (context.extractedLength !== undefined) {
+    span.setAttribute("chorus.file.extracted_length", context.extractedLength);
+  }
+  if (context.errorMessage) {
+    span.setAttribute("chorus.file.error", context.errorMessage);
+  }
+}
+
+/**
+ * Record rate limiting context
+ */
+export function recordRateLimit(context: {
+  userId: string;
+  action: string;
+  wasLimited: boolean;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "chorus.rate_limit.action": context.action,
+    "chorus.rate_limit.was_limited": context.wasLimited,
+  });
+
+  if (context.wasLimited) {
+    span.addEvent("rate_limited", {
+      "slack.user_id": context.userId,
+      "chorus.rate_limit.action": context.action,
+    });
+  }
+}
+
+/**
  * Record user feedback (thumbs up/down) on bot responses
  * Uses OTel span attributes and events (preferred for tracing)
  *
