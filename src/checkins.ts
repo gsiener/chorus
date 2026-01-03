@@ -178,6 +178,41 @@ export async function sendWeeklyCheckins(
     const testUser = env.TEST_CHECKIN_USER;
     if (testUser) {
       console.log(`Test mode: only sending check-ins to ${testUser}`);
+
+      // If test user doesn't own any initiatives, send them a test message anyway
+      if (!byOwner.has(testUser)) {
+        console.log(`Test user ${testUser} has no initiatives, sending test message`);
+        const testMessage =
+          "👋 *Weekly Initiative Check-in (Test)*\n\n" +
+          "_This is a test message. You don't currently own any initiatives._\n\n" +
+          "Use `@Chorus add initiative \"Name\" owned by @you` to create one.";
+
+        if (await shouldSendCheckin(testUser, env)) {
+          const result = await postDirectMessage(testUser, testMessage, env);
+          if (result) {
+            await recordCheckin(testUser, env);
+            return {
+              success: true,
+              message: "Sent test check-in (no initiatives).",
+              sentTo: 1,
+            };
+          } else {
+            console.error(`Failed to send test check-in to ${testUser}`);
+            return {
+              success: false,
+              message: "Failed to send test check-in DM.",
+              sentTo: 0,
+            };
+          }
+        } else {
+          console.log(`Skipping test check-in for ${testUser} (recently sent)`);
+          return {
+            success: true,
+            message: "Skipped test check-in (recently sent).",
+            sentTo: 0,
+          };
+        }
+      }
     }
 
     for (const [ownerId, initiatives] of byOwner) {

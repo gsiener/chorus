@@ -135,4 +135,74 @@ describe("Weekly Check-ins", () => {
     expect(result.success).toBe(true);
     expect(result.sentTo).toBe(0); // Should skip due to rate limiting
   });
+
+  it("sends test message when test user has no initiatives", async () => {
+    const testEnv = {
+      ...mockEnv,
+      TEST_CHECKIN_USER: "U_TEST_USER",
+    };
+
+    // No initiatives in the system
+    mockKvStore["initiatives:index"] = JSON.stringify({ initiatives: [] });
+
+    // Mock Slack API calls
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
+    }));
+
+    const result = await sendWeeklyCheckins(testEnv);
+
+    expect(result.success).toBe(true);
+    expect(result.sentTo).toBe(1);
+    expect(result.message).toBe("Sent test check-in (no initiatives).");
+    expect(mockKvStore["checkin:last:U_TEST_USER"]).toBeDefined();
+  });
+
+  it("sends real check-in when test user owns initiatives", async () => {
+    const testEnv = {
+      ...mockEnv,
+      TEST_CHECKIN_USER: "U_TEST_USER",
+    };
+
+    // Test user owns an initiative
+    mockKvStore["initiatives:index"] = JSON.stringify({
+      initiatives: [
+        {
+          id: "test-init",
+          name: "Test Initiative",
+          owner: "U_TEST_USER",
+          status: "active",
+          hasMetrics: false,
+          hasPrd: false,
+          updatedAt: "2024-01-01",
+        },
+      ],
+    });
+
+    mockKvStore["initiatives:detail:test-init"] = JSON.stringify({
+      id: "test-init",
+      name: "Test Initiative",
+      description: "A test initiative",
+      owner: "U_TEST_USER",
+      status: { value: "active", updatedAt: "2024-01-01", updatedBy: "test" },
+      expectedMetrics: [],
+      createdAt: "2024-01-01",
+      createdBy: "test",
+      updatedAt: "2024-01-01",
+    });
+
+    // Mock Slack API calls
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
+    }));
+
+    const result = await sendWeeklyCheckins(testEnv);
+
+    expect(result.success).toBe(true);
+    expect(result.sentTo).toBe(1);
+    // Should NOT say "no initiatives" - should be a real check-in
+    expect(result.message).not.toContain("no initiatives");
+  });
 });
