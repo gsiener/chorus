@@ -23,11 +23,12 @@ export default defineConfig(({ mode }) => {
       include: ["src/__tests__/claude-quality.test.ts", "src/__tests__/claude-golden.test.ts"],
       testTimeout: 60000,
       hookTimeout: 30000,
-      // Run sequentially to avoid rate limits
-      pool: "forks",
+      // Run tests in parallel (Anthropic API can handle concurrent requests)
+      pool: "threads",
       poolOptions: {
-        forks: {
-          singleFork: true,
+        threads: {
+          maxThreads: 4,
+          minThreads: 2,
         },
       },
       env,

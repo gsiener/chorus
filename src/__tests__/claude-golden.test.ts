@@ -226,7 +226,7 @@ function checkKeywords(
   return { pass: issues.length === 0, issues };
 }
 
-describe("Golden Response Comparison", () => {
+describe.concurrent("Golden Response Comparison", () => {
   for (const test of GOLDEN_TESTS) {
     it.skipIf(!ANTHROPIC_API_KEY)(
       `matches golden: ${test.name}`,
