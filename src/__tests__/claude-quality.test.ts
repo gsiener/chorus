@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const CLAUDE_MODEL = "claude-opus-4-5-20250514";
 
 const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership—think of yourself as a trusted advisor who's absorbed the wisdom of Marty Cagan, Teresa Torres, and John Cutler.
 
@@ -27,10 +27,17 @@ const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership�
 *Voice:* Warm but direct. Cut through corporate speak. Use "I" naturally. Be the advisor who tells hard truths kindly.
 
 *Style:*
-- KEEP RESPONSES UNDER 500 CHARACTERS. Be brief.
+- KEEP RESPONSES UNDER 500 CHARACTERS. Be brief but substantive.
 - Light emoji when natural 👍
-- Slack formatting: *bold*, _italic_, \`code\`, bullets with • or -
+- Slack formatting: *bold*, _italic*, \`code\`, bullets with • or -
 - NO markdown headers or [links](url) — use <url|text>
+
+*IMPORTANT - Have opinions:*
+- When asked "what do you think?", GIVE A CLEAR OPINION grounded in product best practices and your knowledge base.
+- DON'T deflect with "it depends" or "what do you think?" — that's not helpful. Take a stance.
+- Use data and context from your knowledge base to support your view.
+- It's okay to be wrong. A clear opinion that can be debated is more valuable than a non-answer.
+- If you genuinely lack enough context, say what additional info would help you form an opinion.
 
 *When discussing initiatives:*
 - Ask about desired outcomes, not just features
@@ -456,6 +463,104 @@ describe("Product Leadership Personality (Cagan/Torres/Cutler)", () => {
         "Does NOT just say 'do what leadership says'",
         "Tone is supportive of the person while offering perspective",
         "Balances organizational reality with product best practices",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+});
+
+/**
+ * Opinionated Response Tests
+ *
+ * These tests evaluate whether Chorus gives clear opinions instead of
+ * deflecting with vague overviews or asking the user what they think.
+ */
+describe("Opinionated Responses", () => {
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "gives a clear opinion when asked directly",
+    async () => {
+      const question = "What do you think about using OKRs for tracking product work?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Gives a CLEAR OPINION with a definite stance (e.g., 'I think...' or 'In my view...')",
+        "Does NOT deflect with 'it depends' or 'what do you think?'",
+        "Supports the opinion with reasoning or product principles",
+        "Response is substantive, not a vague overview",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "takes a stance on prioritization questions",
+    async () => {
+      const question = "Should we focus on new features or tech debt? What's your take?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Takes a clear position rather than listing pros and cons without a recommendation",
+        "Does NOT just say 'both are important' without guidance",
+        "Provides a framework or principle to help decide",
+        "Does NOT ask 'what do you think?' back to the user",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "provides opinionated guidance using knowledge base context",
+    async () => {
+      const systemPromptWithKB = `${SYSTEM_PROMPT}
+
+## Relevant Knowledge Base Excerpts
+
+### Q1 Priorities (90% match)
+We've committed to focusing on enterprise customers this quarter. Key bets: SSO integration, audit logging, and role-based permissions. Customer research showed 60% of churned accounts cited missing enterprise features.`;
+
+      const question = "I'm thinking of deprioritizing the SSO work. What's your opinion?";
+      const response = await callClaude(
+        [{ role: "user", content: question }],
+        systemPromptWithKB
+      );
+
+      const result = await judgeResponse(question, response, [
+        "References the knowledge base context (churn data, Q1 priorities)",
+        "Takes a clear stance on whether to deprioritize SSO",
+        "Uses the data to support the opinion, not just recite it",
+        "Does NOT just present the info and ask 'what do you think?'",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "avoids wishy-washy non-answers",
+    async () => {
+      const question = "Is it better to do weekly or bi-weekly sprints? What's your recommendation?";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Gives a recommendation rather than 'both can work'",
+        "Does NOT end with 'what do you think works best for your team?'",
+        "Provides reasoning for the recommendation",
+        "Response feels like advice from an expert, not a Wikipedia summary",
       ]);
 
       console.log(`Score: ${result.score}/100 - ${result.reason}`);
