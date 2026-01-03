@@ -1,6 +1,6 @@
 import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue, ExpectedMetric } from "./types";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
-import { convertThreadToMessages, generateResponse, ThreadInfo } from "./claude";
+import { convertThreadToMessages, generateResponse, ThreadInfo, CLAUDE_MODEL } from "./claude";
 import { addDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
@@ -628,11 +628,18 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
-  // Add Slack context to the current trace span
+  // Add Slack and GenAI context to the current trace span
   const span = trace.getActiveSpan();
-  span?.setAttribute("slack.user_id", user);
-  span?.setAttribute("slack.channel", channel);
-  span?.setAttribute("slack.event_type", "app_mention");
+  span?.setAttributes({
+    // Slack context
+    "slack.user_id": user,
+    "slack.channel": channel,
+    "slack.event_type": "app_mention",
+    // GenAI context (OTel semantic conventions)
+    "gen_ai.operation.name": "chat",
+    "gen_ai.system": "anthropic",
+    "gen_ai.request.model": CLAUDE_MODEL,
+  });
 
   try {
     const threadTs = thread_ts ?? ts;
@@ -936,8 +943,19 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     await addReaction(channel, thinkingTs, "thumbsup", env);
     await addReaction(channel, thinkingTs, "thumbsdown", env);
 
-    // Log metrics
-    console.log(`Response complete: cached=${result.cached}, tokens=${result.inputTokens + result.outputTokens}`);
+    // Record gen_ai attributes on span and log metrics
+    const genAiSpan = trace.getActiveSpan();
+    genAiSpan?.setAttributes({
+      "gen_ai.response.cache_hit": result.cached,
+      "gen_ai.usage.input_tokens": result.inputTokens,
+      "gen_ai.usage.output_tokens": result.outputTokens,
+    });
+    console.log(JSON.stringify({
+      event: "response_complete",
+      "gen_ai.response.cache_hit": result.cached,
+      "gen_ai.usage.input_tokens": result.inputTokens,
+      "gen_ai.usage.output_tokens": result.outputTokens,
+    }));
   } catch (error) {
     console.error("Error handling mention:", error);
     if (error instanceof Error) {

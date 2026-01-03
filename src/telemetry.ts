@@ -34,6 +34,10 @@ export function recordGenAiMetrics(metrics: {
   responseId?: string;
   streaming?: boolean;
   conversationId?: string;
+  cacheHit?: boolean;
+  // Anthropic prompt caching tokens
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
@@ -83,6 +87,19 @@ export function recordGenAiMetrics(metrics: {
   // Custom: streaming indicator (not in spec but useful)
   if (metrics.streaming !== undefined) {
     span.setAttribute("gen_ai.request.streaming", metrics.streaming);
+  }
+
+  // Custom: cache hit indicator (response-level caching)
+  if (metrics.cacheHit !== undefined) {
+    span.setAttribute("gen_ai.response.cache_hit", metrics.cacheHit);
+  }
+
+  // Anthropic prompt caching tokens (per OTel GenAI conventions discussion)
+  if (metrics.cacheCreationInputTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
+  }
+  if (metrics.cacheReadInputTokens !== undefined) {
+    span.setAttribute("gen_ai.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
   }
 }
 

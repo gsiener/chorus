@@ -95,7 +95,7 @@ function cleanSlackMessage(text: string, botUserId: string): string {
     .trim();
 }
 
-const CLAUDE_MODEL = "claude-opus-4-5-20251101";
+export const CLAUDE_MODEL = "claude-opus-4-5-20251101";
 const CLAUDE_MAX_TOKENS = 1024;
 
 /**
@@ -126,6 +126,13 @@ export async function generateResponse(
   const cached = await env.DOCS_KV.get(cacheKey);
   if (cached) {
     console.log("Cache hit for response");
+    recordGenAiMetrics({
+      operationName: "chat",
+      requestModel: CLAUDE_MODEL,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHit: true,
+    });
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
@@ -210,14 +217,17 @@ export async function generateResponse(
   console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
   recordGenAiMetrics({
     operationName: "chat",
-    requestModel: "claude-sonnet-4-20250514",
+    requestModel: CLAUDE_MODEL,
     responseModel: data.model,
     inputTokens,
     outputTokens,
-    maxTokens: 1024,
+    maxTokens: CLAUDE_MAX_TOKENS,
     responseId: data.id,
     finishReasons: data.stop_reason ? [data.stop_reason] : undefined,
     streaming: false,
+    cacheHit: false,
+    cacheCreationInputTokens: data.usage?.cache_creation_input_tokens,
+    cacheReadInputTokens: data.usage?.cache_read_input_tokens,
   });
 
   // Cache the response
@@ -252,6 +262,13 @@ export async function generateResponseStreaming(
   const cached = await env.DOCS_KV.get(cacheKey);
   if (cached) {
     console.log("Cache hit for response");
+    recordGenAiMetrics({
+      operationName: "chat",
+      requestModel: CLAUDE_MODEL,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHit: true,
+    });
     await onChunk(cached);
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
@@ -356,11 +373,12 @@ export async function generateResponseStreaming(
   console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
   recordGenAiMetrics({
     operationName: "chat",
-    requestModel: "claude-sonnet-4-20250514",
+    requestModel: CLAUDE_MODEL,
     inputTokens,
     outputTokens,
-    maxTokens: 1024,
+    maxTokens: CLAUDE_MAX_TOKENS,
     streaming: true,
+    cacheHit: false,
   });
 
   // Cache the response
