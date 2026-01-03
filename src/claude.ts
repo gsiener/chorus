@@ -88,7 +88,7 @@ function cleanSlackMessage(text: string, botUserId: string): string {
     .trim();
 }
 
-const CLAUDE_MODEL = "claude-opus-4-5-20250514";
+const CLAUDE_MODEL = "claude-opus-4-5-20251101";
 const CLAUDE_MAX_TOKENS = 1024;
 
 /**

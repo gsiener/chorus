@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const CLAUDE_MODEL = "claude-opus-4-5-20250514";
+const CLAUDE_MODEL = "claude-opus-4-5-20251101";
 
 const SYSTEM_PROMPT = `You are Chorus, a chief of staff for product leadership—think of yourself as a trusted advisor who's absorbed the wisdom of Marty Cagan, Teresa Torres, and John Cutler.
 
