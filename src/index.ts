@@ -1000,15 +1000,18 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
 
     const feedback = reaction === "+1" || reaction === "thumbsup" ? "positive" : "negative";
 
+    // Record feedback on span for tracing
+    span?.setAttribute("chorus.feedback", feedback);
+    span?.setAttribute("chorus.feedback.message_ts", item.ts);
+
     // Log feedback for Honeycomb (via Workers observability)
     console.log(JSON.stringify({
-      type: "feedback",
-      feedback,
-      reaction,
-      user,
-      channel: item.channel,
-      message_ts: item.ts,
-      timestamp: new Date().toISOString(),
+      event: "feedback",
+      "chorus.feedback": feedback,
+      "slack.reaction": reaction,
+      "slack.user_id": user,
+      "slack.channel": item.channel,
+      "chorus.feedback.message_ts": item.ts,
     }));
 
   } catch (error) {
