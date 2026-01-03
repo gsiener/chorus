@@ -20,6 +20,29 @@ We use **Linear** to track tasks:
 **Creating issues:**
 - Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
 
+**Linear API access:**
+- API key is in `~/.env` as `LINEAR_API_KEY`
+- Use the GraphQL API at `https://api.linear.app/graphql`
+- Team ID for PDD Leadership: `daa91240-92e1-4a78-8cc7-a53684a431b1`
+
+Example to create an issue:
+```bash
+curl -s -X POST https://api.linear.app/graphql \
+  -H "Content-Type: application/json" \
+  -H "Authorization: $LINEAR_API_KEY" \
+  -d '{
+    "query": "mutation CreateIssue($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }",
+    "variables": {
+      "input": {
+        "title": "Issue title",
+        "description": "Issue description",
+        "teamId": "daa91240-92e1-4a78-8cc7-a53684a431b1",
+        "projectId": "d581ee59-765e-4257-83f8-44e75620bac6"
+      }
+    }
+  }'
+```
+
 ## Project Overview
 
 Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using Claude for AI-powered responses. It maintains thread context for natural conversations and is focused on internal knowledge about product roadmap and strategy.
