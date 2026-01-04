@@ -1,5 +1,5 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
-import { searchDocuments, formatSearchResultsForContext } from "./embeddings";
+import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
 import { recordGenAiMetrics } from "./telemetry";
@@ -152,15 +152,12 @@ export async function generateResponse(
     threadContext
   );
 
-  // Load initiatives context, search knowledge base, and detect gaps in parallel
-  const [searchResults, initiativesContext, gapNudge] = await Promise.all([
-    query ? searchDocuments(query, env, 5) : Promise.resolve([]),
+  // Load full knowledge base, initiatives context, and detect gaps in parallel
+  const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
+    getKnowledgeBase(env),
     getInitiativesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
-
-  // Format search results for context
-  const knowledgeContext = formatSearchResultsForContext(searchResults);
 
   let systemPrompt = SYSTEM_PROMPT;
 
@@ -173,8 +170,8 @@ export async function generateResponse(
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
-  if (knowledgeContext) {
-    systemPrompt += `\n\n${knowledgeContext}`;
+  if (knowledgeBase) {
+    systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }
   if (gapNudge) {
     systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
@@ -273,26 +270,23 @@ export async function generateResponseStreaming(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Extract query from the last user message for semantic search
+  // Extract query from the last user message for gap detection
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
-  // Load initiatives context, search knowledge base, and detect gaps in parallel
-  const [searchResults, initiativesContext, gapNudge] = await Promise.all([
-    query ? searchDocuments(query, env, 5) : Promise.resolve([]),
+  // Load full knowledge base, initiatives context, and detect gaps in parallel
+  const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
+    getKnowledgeBase(env),
     getInitiativesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
-
-  // Format search results for context
-  const knowledgeContext = formatSearchResultsForContext(searchResults);
 
   let systemPrompt = SYSTEM_PROMPT;
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
-  if (knowledgeContext) {
-    systemPrompt += `\n\n${knowledgeContext}`;
+  if (knowledgeBase) {
+    systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }
   if (gapNudge) {
     systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
