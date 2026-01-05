@@ -1,11 +1,10 @@
 /**
- * Slack API integration with typed errors using Effect
+ * Slack API integration
  */
 
-import { Effect, Context, Layer, pipe } from "effect";
-import type { Env, SlackMessage, SlackThreadResponse, SlackPostResponse } from "./types";
+import type { Env, SlackMessage } from "./types";
 
-// Typed error classes
+// Error classes
 
 export class SignatureVerificationError extends Error {
   readonly _tag = "SignatureVerificationError" as const;
@@ -33,64 +32,42 @@ export class SlackApiError extends Error {
 
 export type SlackError = SignatureVerificationError | SlackApiError;
 
-// Service definition
+// Signature verification
 
-export interface SlackServiceConfig {
-  readonly botToken: string;
-  readonly signingSecret: string;
-}
-
-export class SlackService extends Context.Tag("SlackService")<
-  SlackService,
-  SlackServiceConfig
->() {}
-
-export const SlackServiceLive = (botToken: string, signingSecret: string) =>
-  Layer.succeed(SlackService, { botToken, signingSecret });
-
-const envToLayer = (env: Env) =>
-  SlackServiceLive(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
-
-// Effect-based signature verification
-
-export function verifySignatureEffect(
+export async function verifySlackSignature(
   request: Request,
-  body: string
-): Effect.Effect<boolean, SignatureVerificationError, SlackService> {
-  return Effect.gen(function* () {
-    const { signingSecret } = yield* SlackService;
-
+  body: string,
+  signingSecret: string
+): Promise<boolean> {
+  try {
     const timestamp = request.headers.get("x-slack-request-timestamp");
     const signature = request.headers.get("x-slack-signature");
 
     if (!timestamp || !signature) {
-      return yield* Effect.fail(new SignatureVerificationError("missing_headers"));
+      return false;
     }
 
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(now - parseInt(timestamp)) > 5) {
-      return yield* Effect.fail(new SignatureVerificationError("timestamp_expired"));
+      return false;
     }
 
     const sigBaseString = `v0:${timestamp}:${body}`;
     const encoder = new TextEncoder();
 
-    const key = yield* Effect.tryPromise({
-      try: () =>
-        crypto.subtle.importKey(
-          "raw",
-          encoder.encode(signingSecret),
-          { name: "HMAC", hash: "SHA-256" },
-          false,
-          ["sign"]
-        ),
-      catch: () => new SignatureVerificationError("signature_mismatch"),
-    });
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(signingSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
 
-    const signatureBuffer = yield* Effect.tryPromise({
-      try: () => crypto.subtle.sign("HMAC", key, encoder.encode(sigBaseString)),
-      catch: () => new SignatureVerificationError("signature_mismatch"),
-    });
+    const signatureBuffer = await crypto.subtle.sign(
+      "HMAC",
+      key,
+      encoder.encode(sigBaseString)
+    );
 
     const computedSignature =
       "v0=" +
@@ -98,85 +75,45 @@ export function verifySignatureEffect(
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
 
-    if (signature !== computedSignature) {
-      return yield* Effect.fail(new SignatureVerificationError("signature_mismatch"));
-    }
-
-    return true;
-  });
-}
-
-// Promise-based wrapper
-export async function verifySlackSignature(
-  request: Request,
-  body: string,
-  signingSecret: string
-): Promise<boolean> {
-  const layer = SlackServiceLive("", signingSecret);
-  return Effect.runPromise(
-    Effect.provide(verifySignatureEffect(request, body), layer).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
-    )
-  );
+    return signature === computedSignature;
+  } catch {
+    return false;
+  }
 }
 
 // API helpers
 
-function slackFetch<T>(
+interface SlackApiResponse {
+  ok: boolean;
+  error?: string;
+}
+
+async function slackFetch<T extends SlackApiResponse>(
   url: string,
   options: RequestInit,
-  method: string
-): Effect.Effect<T, SlackApiError, SlackService> {
-  return Effect.gen(function* () {
-    const { botToken } = yield* SlackService;
-
-    const response = yield* Effect.tryPromise({
-      try: () =>
-        fetch(url, {
-          ...options,
-          headers: {
-            Authorization: `Bearer ${botToken}`,
-            ...options.headers,
-          },
-        }),
-      catch: (e) => new SlackApiError(String(e), method),
-    });
-
-    const data = (yield* Effect.tryPromise({
-      try: () => response.json(),
-      catch: () => new SlackApiError("json_parse_error", method),
-    })) as { ok: boolean; error?: string } & T;
-
-    if (!data.ok) {
-      return yield* Effect.fail(new SlackApiError(data.error ?? "unknown", method));
-    }
-
-    return data as T;
+  botToken: string
+): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${botToken}`,
+      ...options.headers,
+    },
   });
+
+  const data = (await response.json()) as T;
+
+  if (!data.ok) {
+    throw new SlackApiError(data.error ?? "unknown", url);
+  }
+
+  return data;
 }
 
 // Thread messages
 
-interface ThreadResponse {
-  ok: boolean;
+interface ThreadResponse extends SlackApiResponse {
   messages?: SlackMessage[];
-  error?: string;
-}
-
-export function fetchThreadMessagesEffect(
-  channel: string,
-  threadTs: string
-): Effect.Effect<SlackMessage[], SlackApiError, SlackService> {
-  return pipe(
-    slackFetch<ThreadResponse>(
-      `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
-      {},
-      "conversations.replies"
-    ),
-    Effect.map((data) =>
-      (data.messages ?? []).sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts))
-    )
-  );
 }
 
 export async function fetchThreadMessages(
@@ -184,38 +121,22 @@ export async function fetchThreadMessages(
   threadTs: string,
   env: Env
 ): Promise<SlackMessage[]> {
-  return Effect.runPromise(
-    Effect.provide(fetchThreadMessagesEffect(channel, threadTs), envToLayer(env)).pipe(
-      Effect.catchAll(() => Effect.succeed([] as SlackMessage[]))
-    )
-  );
+  try {
+    const data = await slackFetch<ThreadResponse>(
+      `https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`,
+      {},
+      env.SLACK_BOT_TOKEN
+    );
+    return (data.messages ?? []).sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
+  } catch {
+    return [];
+  }
 }
 
 // Post message
 
-interface PostResponse {
-  ok: boolean;
+interface PostResponse extends SlackApiResponse {
   ts?: string;
-  error?: string;
-}
-
-export function postMessageEffect(
-  channel: string,
-  text: string,
-  threadTs: string | undefined
-): Effect.Effect<string, SlackApiError, SlackService> {
-  return pipe(
-    slackFetch<PostResponse>(
-      "https://slack.com/api/chat.postMessage",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, text, thread_ts: threadTs }),
-      },
-      "chat.postMessage"
-    ),
-    Effect.map((data) => data.ts ?? "")
-  );
 }
 
 export async function postMessage(
@@ -224,33 +145,23 @@ export async function postMessage(
   threadTs: string | undefined,
   env: Env
 ): Promise<string | null> {
-  return Effect.runPromise(
-    Effect.provide(postMessageEffect(channel, text, threadTs), envToLayer(env)).pipe(
-      Effect.catchAll(() => Effect.succeed(null as string | null))
-    )
-  );
-}
-
-// Update message
-
-export function updateMessageEffect(
-  channel: string,
-  ts: string,
-  text: string
-): Effect.Effect<boolean, SlackApiError, SlackService> {
-  return pipe(
-    slackFetch<{ ok: boolean }>(
-      "https://slack.com/api/chat.update",
+  try {
+    const data = await slackFetch<PostResponse>(
+      "https://slack.com/api/chat.postMessage",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, ts, text }),
+        body: JSON.stringify({ channel, text, thread_ts: threadTs }),
       },
-      "chat.update"
-    ),
-    Effect.map(() => true)
-  );
+      env.SLACK_BOT_TOKEN
+    );
+    return data.ts ?? null;
+  } catch {
+    return null;
+  }
 }
+
+// Update message
 
 export async function updateMessage(
   channel: string,
@@ -258,48 +169,25 @@ export async function updateMessage(
   text: string,
   env: Env
 ): Promise<boolean> {
-  return Effect.runPromise(
-    Effect.provide(updateMessageEffect(channel, ts, text), envToLayer(env)).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
-    )
-  );
+  try {
+    await slackFetch<SlackApiResponse>(
+      "https://slack.com/api/chat.update",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, ts, text }),
+      },
+      env.SLACK_BOT_TOKEN
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Add reaction
 
-export function addReactionEffect(
-  channel: string,
-  ts: string,
-  emoji: string
-): Effect.Effect<boolean, SlackApiError, SlackService> {
-  return Effect.gen(function* () {
-    const { botToken } = yield* SlackService;
-
-    const response = yield* Effect.tryPromise({
-      try: () =>
-        fetch("https://slack.com/api/reactions.add", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${botToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ channel, timestamp: ts, name: emoji }),
-        }),
-      catch: (e) => new SlackApiError(String(e), "reactions.add"),
-    });
-
-    const data = (yield* Effect.tryPromise({
-      try: () => response.json(),
-      catch: () => new SlackApiError("json_parse_error", "reactions.add"),
-    })) as { ok: boolean; error?: string };
-
-    if (!data.ok && data.error !== "already_reacted") {
-      return yield* Effect.fail(new SlackApiError(data.error ?? "unknown", "reactions.add"));
-    }
-
-    return true;
-  });
-}
+interface ReactionResponse extends SlackApiResponse {}
 
 export async function addReaction(
   channel: string,
@@ -307,42 +195,33 @@ export async function addReaction(
   emoji: string,
   env: Env
 ): Promise<boolean> {
-  return Effect.runPromise(
-    Effect.provide(addReactionEffect(channel, ts, emoji), envToLayer(env)).pipe(
-      Effect.catchAll(() => Effect.succeed(false))
-    )
-  );
+  try {
+    const response = await fetch("https://slack.com/api/reactions.add", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel, timestamp: ts, name: emoji }),
+    });
+
+    const data = (await response.json()) as ReactionResponse;
+
+    // already_reacted is not an error
+    if (!data.ok && data.error !== "already_reacted") {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Post direct message
 
-interface ConversationOpenResponse {
-  ok: boolean;
+interface ConversationOpenResponse extends SlackApiResponse {
   channel?: { id: string };
-  error?: string;
-}
-
-export function postDirectMessageEffect(
-  userId: string,
-  text: string
-): Effect.Effect<string, SlackApiError, SlackService> {
-  return Effect.gen(function* () {
-    const openData = yield* slackFetch<ConversationOpenResponse>(
-      "https://slack.com/api/conversations.open",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ users: userId }),
-      },
-      "conversations.open"
-    );
-
-    if (!openData.channel) {
-      return yield* Effect.fail(new SlackApiError("no_channel_returned", "conversations.open"));
-    }
-
-    return yield* postMessageEffect(openData.channel.id, text, undefined);
-  });
 }
 
 export async function postDirectMessage(
@@ -350,9 +229,23 @@ export async function postDirectMessage(
   text: string,
   env: Env
 ): Promise<string | null> {
-  return Effect.runPromise(
-    Effect.provide(postDirectMessageEffect(userId, text), envToLayer(env)).pipe(
-      Effect.catchAll(() => Effect.succeed(null as string | null))
-    )
-  );
+  try {
+    const openData = await slackFetch<ConversationOpenResponse>(
+      "https://slack.com/api/conversations.open",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ users: userId }),
+      },
+      env.SLACK_BOT_TOKEN
+    );
+
+    if (!openData.channel) {
+      return null;
+    }
+
+    return postMessage(openData.channel.id, text, undefined, env);
+  } catch {
+    return null;
+  }
 }

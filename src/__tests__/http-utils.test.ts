@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Effect, Exit, Cause } from "effect";
 import {
   fetchWithRetry,
-  fetchEffect,
   NetworkError,
   RateLimitError,
   ServerError,
@@ -114,7 +112,9 @@ describe("fetchWithRetry", () => {
   });
 
   it("throws network error after max retries", async () => {
-    const mockFetch = vi.fn().mockRejectedValue(new Error("Persistent network error"));
+    const mockFetch = vi.fn().mockImplementation(() =>
+      Promise.reject(new Error("Persistent network error"))
+    );
 
     vi.stubGlobal("fetch", mockFetch);
 
@@ -125,7 +125,15 @@ describe("fetchWithRetry", () => {
 
     await vi.runAllTimersAsync();
 
-    await expect(responsePromise).rejects.toThrow("Persistent network error");
+    let error: Error | null = null;
+    try {
+      await responsePromise;
+    } catch (e) {
+      error = e as Error;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toBe("Persistent network error");
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
@@ -187,115 +195,6 @@ describe("fetchWithRetry", () => {
 
     expect(response.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(3);
-  });
-});
-
-describe("fetchEffect", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("returns response on successful fetch", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ success: true }), { status: 200 })
-      )
-    );
-
-    const effect = fetchEffect("https://example.com", {});
-    const result = await Effect.runPromise(effect);
-
-    expect(result.status).toBe(200);
-  });
-
-  it("fails with RateLimitError after max retries on 429", async () => {
-    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 429 }));
-
-    vi.stubGlobal("fetch", mockFetch);
-
-    const effect = fetchEffect("https://example.com", {}, { maxRetries: 3, initialDelayMs: 100 });
-
-    const exitPromise = Effect.runPromiseExit(effect);
-    await vi.runAllTimersAsync();
-    const exit = await exitPromise;
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = Cause.failureOption(exit.cause);
-      expect(error._tag).toBe("Some");
-      if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(RateLimitError);
-      }
-    }
-  });
-
-  it("fails with ServerError after max retries on 5xx", async () => {
-    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
-
-    vi.stubGlobal("fetch", mockFetch);
-
-    const effect = fetchEffect("https://example.com", {}, { maxRetries: 3, initialDelayMs: 100 });
-
-    const exitPromise = Effect.runPromiseExit(effect);
-    await vi.runAllTimersAsync();
-    const exit = await exitPromise;
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = Cause.failureOption(exit.cause);
-      expect(error._tag).toBe("Some");
-      if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(ServerError);
-      }
-    }
-  });
-
-  it("fails with NetworkError on network failure", async () => {
-    const mockFetch = vi.fn().mockRejectedValue(new Error("Network failure"));
-
-    vi.stubGlobal("fetch", mockFetch);
-
-    const effect = fetchEffect("https://example.com", {}, { maxRetries: 3, initialDelayMs: 100 });
-
-    const exitPromise = Effect.runPromiseExit(effect);
-    await vi.runAllTimersAsync();
-    const exit = await exitPromise;
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = Cause.failureOption(exit.cause);
-      expect(error._tag).toBe("Some");
-      if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(NetworkError);
-      }
-    }
-  });
-
-  it("fails with HttpError on 4xx (no retry)", async () => {
-    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 400 }));
-
-    vi.stubGlobal("fetch", mockFetch);
-
-    const effect = fetchEffect("https://example.com", {});
-
-    const exit = await Effect.runPromiseExit(effect);
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = Cause.failureOption(exit.cause);
-      expect(error._tag).toBe("Some");
-      if (error._tag === "Some") {
-        expect(error.value).toBeInstanceOf(HttpError);
-        expect((error.value as HttpError).status).toBe(400);
-      }
-    }
-    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 

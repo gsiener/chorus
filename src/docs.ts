@@ -1,8 +1,7 @@
 /**
- * Document management with typed errors using Effect
+ * Document management for Chorus knowledge base
  */
 
-import { Effect, Context, Option, pipe } from "effect";
 import type { Env } from "./types";
 import { indexDocument, removeDocumentFromIndex } from "./embeddings";
 

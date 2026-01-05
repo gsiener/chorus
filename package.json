@@ -6,8 +6,11 @@
     "dev": "wrangler dev",
     "deploy": "./scripts/deploy.sh",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'src/__tests__/claude-{quality,golden}.test.ts'",
-    "test:watch": "vitest --exclude 'src/__tests__/claude-{quality,golden}.test.ts'",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.unit.config.ts",
+    "test:watch:integration": "vitest --config vitest.config.ts",
     "test:quality": "vitest run --config vitest.quality.config.ts"
   },
   "devDependencies": {
@@ -19,9 +22,7 @@
     "wrangler": "^4.56.0"
   },
   "dependencies": {
-    "@effect/platform": "^0.94.1",
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
-    "@opentelemetry/api": "^1.9.0",
-    "effect": "^3.19.14"
+    "@opentelemetry/api": "^1.9.0"
   }
 }

@@ -4,11 +4,36 @@
  * Provides helpers for adding structured attributes to OpenTelemetry spans.
  * Uses the active span from the OTel context.
  *
- * Follows OTel GenAI Semantic Conventions:
+ * Follows OTel GenAI Semantic Conventions v1.29.0:
  * https://opentelemetry.io/docs/specs/semconv/gen-ai/
+ *
+ * Key semantic conventions used:
+ * - gen_ai.system: The GenAI system identifier (e.g., "anthropic", "openai")
+ * - gen_ai.request.model: Model name in the request
+ * - gen_ai.response.model: Actual model name in response
+ * - gen_ai.operation.name: Operation type ("chat", "embeddings", "text_completion")
+ * - gen_ai.usage.input_tokens: Input token count
+ * - gen_ai.usage.output_tokens: Output token count
+ * - gen_ai.response.finish_reasons: Array of stop reasons
+ * - gen_ai.request.max_tokens: Max tokens limit
+ * - gen_ai.request.temperature: Sampling temperature
  */
 
 import { trace, SpanStatusCode, Span } from "@opentelemetry/api";
+
+/**
+ * Standard GenAI system identifiers per OTel spec
+ */
+export const GEN_AI_SYSTEMS = {
+  ANTHROPIC: "anthropic",
+  OPENAI: "openai",
+  COHERE: "cohere",
+  VERTEX_AI: "vertex_ai",
+  AWS_BEDROCK: "aws_bedrock",
+  CLOUDFLARE: "cloudflare",
+} as const;
+
+export type GenAiSystem = (typeof GEN_AI_SYSTEMS)[keyof typeof GEN_AI_SYSTEMS];
 
 /**
  * Get the current active span
@@ -19,10 +44,11 @@ export function getActiveSpan(): Span | undefined {
 
 /**
  * Record GenAI chat completion metrics on the active span
- * Follows OTel GenAI semantic conventions for inference spans
+ * Follows OTel GenAI semantic conventions v1.29.0 for inference spans
  */
 export function recordGenAiMetrics(metrics: {
-  operationName: "chat" | "embeddings";
+  operationName: "chat" | "embeddings" | "text_completion";
+  system?: GenAiSystem;
   requestModel: string;
   responseModel?: string;
   inputTokens: number;
@@ -30,22 +56,27 @@ export function recordGenAiMetrics(metrics: {
   maxTokens?: number;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  stopSequences?: string[];
   finishReasons?: string[];
   responseId?: string;
   streaming?: boolean;
   conversationId?: string;
   cacheHit?: boolean;
-  // Anthropic prompt caching tokens
+  // Anthropic prompt caching tokens (experimental convention)
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  // Tool/function calls (per GenAI events spec)
+  toolCallsCount?: number;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
 
-  // Required attributes
+  // Required attributes per OTel GenAI spec
   span.setAttributes({
     "gen_ai.operation.name": metrics.operationName,
-    "gen_ai.provider.name": "anthropic",
+    // gen_ai.system is the canonical identifier (replaces provider.name)
+    "gen_ai.system": metrics.system ?? GEN_AI_SYSTEMS.ANTHROPIC,
     "gen_ai.request.model": metrics.requestModel,
   });
 
@@ -55,7 +86,7 @@ export function recordGenAiMetrics(metrics: {
     "gen_ai.usage.output_tokens": metrics.outputTokens,
   });
 
-  // Response model (may differ from request)
+  // Response model (may differ from request due to aliases)
   if (metrics.responseModel) {
     span.setAttribute("gen_ai.response.model", metrics.responseModel);
   }
@@ -70,31 +101,42 @@ export function recordGenAiMetrics(metrics: {
   if (metrics.topP !== undefined) {
     span.setAttribute("gen_ai.request.top_p", metrics.topP);
   }
+  if (metrics.topK !== undefined) {
+    span.setAttribute("gen_ai.request.top_k", metrics.topK);
+  }
+  if (metrics.stopSequences && metrics.stopSequences.length > 0) {
+    span.setAttribute("gen_ai.request.stop_sequences", metrics.stopSequences);
+  }
 
   // Response metadata (recommended)
-  if (metrics.finishReasons) {
+  if (metrics.finishReasons && metrics.finishReasons.length > 0) {
     span.setAttribute("gen_ai.response.finish_reasons", metrics.finishReasons);
   }
   if (metrics.responseId) {
     span.setAttribute("gen_ai.response.id", metrics.responseId);
   }
 
-  // Conversation tracking
+  // Tool/function call tracking
+  if (metrics.toolCallsCount !== undefined) {
+    span.setAttribute("gen_ai.response.tool_calls_count", metrics.toolCallsCount);
+  }
+
+  // Conversation tracking (experimental)
   if (metrics.conversationId) {
     span.setAttribute("gen_ai.conversation.id", metrics.conversationId);
   }
 
-  // Custom: streaming indicator (not in spec but useful)
+  // Streaming indicator (experimental)
   if (metrics.streaming !== undefined) {
     span.setAttribute("gen_ai.request.streaming", metrics.streaming);
   }
 
-  // Custom: cache hit indicator (response-level caching)
+  // Response-level cache hit (experimental)
   if (metrics.cacheHit !== undefined) {
     span.setAttribute("gen_ai.response.cache_hit", metrics.cacheHit);
   }
 
-  // Anthropic prompt caching tokens (per OTel GenAI conventions discussion)
+  // Anthropic prompt caching tokens (experimental convention)
   if (metrics.cacheCreationInputTokens !== undefined) {
     span.setAttribute("gen_ai.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
   }
@@ -105,19 +147,21 @@ export function recordGenAiMetrics(metrics: {
 
 /**
  * Record GenAI embeddings operation metrics
- * Follows OTel GenAI semantic conventions for embeddings spans
+ * Follows OTel GenAI semantic conventions v1.29.0 for embeddings spans
  */
 export function recordEmbeddingsMetrics(metrics: {
   model: string;
+  system?: GenAiSystem;
   inputTokens?: number;
   dimensionCount?: number;
+  inputCount?: number;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
 
   span.setAttributes({
     "gen_ai.operation.name": "embeddings",
-    "gen_ai.provider.name": "cloudflare",
+    "gen_ai.system": metrics.system ?? GEN_AI_SYSTEMS.CLOUDFLARE,
     "gen_ai.request.model": metrics.model,
   });
 
@@ -125,7 +169,10 @@ export function recordEmbeddingsMetrics(metrics: {
     span.setAttribute("gen_ai.usage.input_tokens", metrics.inputTokens);
   }
   if (metrics.dimensionCount !== undefined) {
-    span.setAttribute("gen_ai.embeddings.dimension.count", metrics.dimensionCount);
+    span.setAttribute("gen_ai.request.embedding_dimensions", metrics.dimensionCount);
+  }
+  if (metrics.inputCount !== undefined) {
+    span.setAttribute("gen_ai.request.input_count", metrics.inputCount);
   }
 }
 
