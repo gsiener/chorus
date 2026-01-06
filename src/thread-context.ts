@@ -108,10 +108,10 @@ function generateSimpleSummary(messages: ClaudeMessage[]): string {
 export function processMessagesForContext(
   messages: ClaudeMessage[],
   existingContext: ThreadContext | null
-): { messages: ClaudeMessage[]; contextPrefix: string | null } {
+): { messages: ClaudeMessage[]; contextPrefix: string | null; wasTruncated: boolean } {
   // If thread is short, use all messages
   if (messages.length <= SUMMARIZATION_THRESHOLD) {
-    return { messages, contextPrefix: null };
+    return { messages, contextPrefix: null, wasTruncated: false };
   }
 
   // Split into earlier and recent messages
@@ -133,7 +133,7 @@ export function processMessagesForContext(
   // Create context prefix for the system prompt
   const contextPrefix = `## Previous Conversation Context\n\n${summary}\n\nKey topics: ${extractKeyTopics(earlierMessages).join(", ")}`;
 
-  return { messages: recentMessages, contextPrefix };
+  return { messages: recentMessages, contextPrefix, wasTruncated: true };
 }
 
 /**

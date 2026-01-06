@@ -2,7 +2,16 @@ import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
-import { recordGenAiMetrics, recordGenAiInput, recordGenAiOutput } from "./telemetry";
+import {
+  recordGenAiMetrics,
+  recordGenAiInput,
+  recordGenAiOutput,
+  recordGenAiLatency,
+  recordCost,
+  calculateCost,
+  recordConversationQuality,
+  recordKnowledgeBaseMetrics,
+} from "./telemetry";
 import {
   getThreadContext,
   updateThreadContext,
@@ -105,17 +114,36 @@ export async function generateResponse(
   }
 
   // Process messages with thread context (summarize if long)
-  const { messages: processedMessages, contextPrefix } = processMessagesForContext(
+  const { messages: processedMessages, contextPrefix, wasTruncated } = processMessagesForContext(
     messages,
     threadContext
   );
 
   // Load full knowledge base, initiatives context, and detect gaps in parallel
+  const kbStartTime = Date.now();
   const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
     getInitiativesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
+  const kbLatencyMs = Date.now() - kbStartTime;
+
+  // Record knowledge base metrics
+  const kbDocCount = knowledgeBase ? (knowledgeBase.match(/^## /gm) || []).length : 0;
+  recordKnowledgeBaseMetrics({
+    documentsCount: kbDocCount,
+    totalCharacters: knowledgeBase?.length,
+    retrievalLatencyMs: kbLatencyMs,
+    cacheHit: false, // KV doesn't have cache semantics we can detect
+  });
+
+  // Record conversation quality signals
+  const totalContextLength = processedMessages.reduce((sum, m) => sum + m.content.length, 0);
+  recordConversationQuality({
+    turnCount: messages.length,
+    contextLength: totalContextLength,
+    wasTruncated: wasTruncated ?? false,
+  });
 
   let systemPrompt = SYSTEM_PROMPT;
 
@@ -141,6 +169,7 @@ export async function generateResponse(
     messages: processedMessages,
   });
 
+  const apiStartTime = Date.now();
   const response = await fetchWithRetry(
     "https://api.anthropic.com/v1/messages",
     {
@@ -159,6 +188,7 @@ export async function generateResponse(
     },
     { initialDelayMs: 1000 }
   );
+  const apiLatencyMs = Date.now() - apiStartTime;
 
   if (!response.ok) {
     const error = await response.text();
@@ -167,6 +197,10 @@ export async function generateResponse(
   }
 
   const data = (await response.json()) as ClaudeResponse;
+
+  // Record latency
+  recordGenAiLatency({ totalGenerationMs: apiLatencyMs });
+
   const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
   const text = convertToSlackFormat(rawText);
 
@@ -174,8 +208,12 @@ export async function generateResponse(
   const inputTokens = data.usage?.input_tokens ?? 0;
   const outputTokens = data.usage?.output_tokens ?? 0;
 
+  // Calculate and record cost
+  const estimatedCost = calculateCost(CLAUDE_MODEL, inputTokens, outputTokens);
+  recordCost(estimatedCost);
+
   // Record metrics for observability (OTel GenAI semantic conventions)
-  console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
+  console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}, cost=$${estimatedCost.toFixed(6)}`);
   recordGenAiMetrics({
     operationName: "chat",
     requestModel: CLAUDE_MODEL,
@@ -242,11 +280,30 @@ export async function generateResponseStreaming(
   const query = lastUserMessage?.content || "";
 
   // Load full knowledge base, initiatives context, and detect gaps in parallel
+  const kbStartTime = Date.now();
   const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
     getInitiativesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
+  const kbLatencyMs = Date.now() - kbStartTime;
+
+  // Record knowledge base metrics
+  const kbDocCount = knowledgeBase ? (knowledgeBase.match(/^## /gm) || []).length : 0;
+  recordKnowledgeBaseMetrics({
+    documentsCount: kbDocCount,
+    totalCharacters: knowledgeBase?.length,
+    retrievalLatencyMs: kbLatencyMs,
+    cacheHit: false,
+  });
+
+  // Record conversation quality signals
+  const totalContextLength = messages.reduce((sum, m) => sum + m.content.length, 0);
+  recordConversationQuality({
+    turnCount: messages.length,
+    contextLength: totalContextLength,
+    wasTruncated: false, // Streaming doesn't use thread context truncation
+  });
 
   let systemPrompt = SYSTEM_PROMPT;
   if (initiativesContext) {
@@ -265,6 +322,8 @@ export async function generateResponseStreaming(
     messages,
   });
 
+  const apiStartTime = Date.now();
+  let timeToFirstTokenMs: number | undefined;
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -314,6 +373,10 @@ export async function generateResponseStreaming(
 
           // Extract text from content_block_delta events
           if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            // Record time to first token on first text chunk
+            if (timeToFirstTokenMs === undefined) {
+              timeToFirstTokenMs = Date.now() - apiStartTime;
+            }
             fullText += event.delta.text;
             await onChunk(event.delta.text);
           }
@@ -335,9 +398,20 @@ export async function generateResponseStreaming(
   }
 
   const text = convertToSlackFormat(fullText);
+  const apiLatencyMs = Date.now() - apiStartTime;
+
+  // Record latency breakdown
+  recordGenAiLatency({
+    totalGenerationMs: apiLatencyMs,
+    timeToFirstTokenMs,
+  });
+
+  // Calculate and record cost
+  const estimatedCost = calculateCost(CLAUDE_MODEL, inputTokens, outputTokens);
+  recordCost(estimatedCost);
 
   // Record metrics for observability (OTel GenAI semantic conventions)
-  console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}`);
+  console.log(`Token usage: input=${inputTokens}, output=${outputTokens}, total=${inputTokens + outputTokens}, cost=$${estimatedCost.toFixed(6)}`);
   recordGenAiMetrics({
     operationName: "chat",
     requestModel: CLAUDE_MODEL,

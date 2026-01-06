@@ -33,6 +33,7 @@ import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
   recordCommand,
   recordError,
+  recordCategorizedError,
   recordFeedback,
   recordRequestContext,
   recordThreadContext,
@@ -40,6 +41,7 @@ import {
   recordClaudeResponse,
   recordFileProcessing,
   recordRateLimit,
+  recordSlackLatency,
 } from "./telemetry";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 
@@ -833,10 +835,15 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     // Regular message - route to Claude
     let messages;
     let threadMessageCount = 1;
+    let threadFetchMs: number | undefined;
 
     if (thread_ts) {
-      // Fetch existing thread history
+      // Fetch existing thread history with timing
+      const threadFetchStart = Date.now();
       const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
+      threadFetchMs = Date.now() - threadFetchStart;
+      recordSlackLatency({ threadFetchMs });
+
       messages = convertThreadToMessages(threadMessages, botUserId);
       threadMessageCount = threadMessages.length;
 
@@ -858,8 +865,11 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       ];
     }
 
-    // Post a "thinking" message
+    // Post a "thinking" message with timing
+    const postStart = Date.now();
     const thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
+    const messagePostMs = Date.now() - postStart;
+    recordSlackLatency({ messagePostMs });
 
     if (!thinkingTs) {
       throw new Error("Failed to post thinking message");
@@ -869,8 +879,11 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const threadInfo: ThreadInfo | undefined = threadTs ? { channel, threadTs } : undefined;
     const result = await generateResponse(messages, env, threadInfo);
 
-    // Update with final response
+    // Update with final response (with timing)
+    const updateStart = Date.now();
     await updateMessage(channel, thinkingTs, result.text, env);
+    const messageUpdateMs = Date.now() - updateStart;
+    recordSlackLatency({ messageUpdateMs });
 
     // Add feedback reactions to the response
     await addReaction(channel, thinkingTs, "thumbsup", env);
@@ -888,7 +901,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   } catch (error) {
     console.error("Error handling mention:", error);
     if (error instanceof Error) {
-      recordError(error, "handleMention");
+      recordCategorizedError(error, "handleMention");
     }
     await postMessage(
       channel,
@@ -934,7 +947,7 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
   } catch (error) {
     console.error("Error handling reaction:", error);
     if (error instanceof Error) {
-      recordError(error, "handleReaction");
+      recordCategorizedError(error, "handleReaction");
     }
   }
 }

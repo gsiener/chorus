@@ -22,10 +22,26 @@
  * - gen_ai.response.model: Actual model in response
  * - gen_ai.usage.input_tokens: Input token count
  * - gen_ai.usage.output_tokens: Output token count
+ * - gen_ai.usage.estimated_cost_usd: Estimated cost in USD
  * - gen_ai.response.finish_reasons: Stop reasons array
  * - gen_ai.system_instructions: System prompt content
  * - gen_ai.input.messages: Serialized conversation messages
  * - gen_ai.output.content: Generated completion
+ * - gen_ai.latency.*: Latency breakdown metrics
+ *
+ * Conversation quality signals:
+ * - conversation.turn_count: Number of messages in thread
+ * - conversation.context_length: Total characters of context
+ * - conversation.was_truncated: Whether context was summarized
+ *
+ * RAG/Knowledge base metrics:
+ * - knowledge_base.documents_count: Number of documents in KB
+ * - knowledge_base.retrieval_latency_ms: Time to fetch KB
+ * - knowledge_base.cache_hit: Whether KB was cached
+ *
+ * Error categorization:
+ * - error.category: Type of error (rate_limit, auth, timeout, etc.)
+ * - error.retryable: Whether the error is retryable
  *
  * Note: OTel spec recommends events for large payloads, but otel-cf-workers
  * doesn't export span events. We use span attributes as Honeycomb handles
@@ -672,4 +688,230 @@ export function emitLogEvent(
 
   // Cloudflare Workers observability parses object arguments as attributes
   logFn(eventName, attributes);
+}
+
+// ============================================================================
+// Cost Tracking
+// ============================================================================
+
+/**
+ * Claude model pricing (USD per 1M tokens) as of Jan 2025
+ * https://www.anthropic.com/pricing
+ */
+const CLAUDE_PRICING: Record<string, { input: number; output: number }> = {
+  // Claude 3.5 Sonnet
+  "claude-3-5-sonnet-20240620": { input: 3.0, output: 15.0 },
+  "claude-3-5-sonnet-20241022": { input: 3.0, output: 15.0 },
+  // Claude 3.5 Haiku
+  "claude-3-5-haiku-20241022": { input: 1.0, output: 5.0 },
+  // Claude 3 Opus
+  "claude-3-opus-20240229": { input: 15.0, output: 75.0 },
+  // Claude Opus 4.5
+  "claude-opus-4-5-20251101": { input: 15.0, output: 75.0 },
+  // Default fallback (assume Opus pricing as safe upper bound)
+  default: { input: 15.0, output: 75.0 },
+};
+
+/**
+ * Calculate estimated cost in USD for a Claude API call
+ */
+export function calculateCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const pricing = CLAUDE_PRICING[model] ?? CLAUDE_PRICING.default;
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  return inputCost + outputCost;
+}
+
+/**
+ * Record cost tracking attribute on the active span
+ */
+export function recordCost(estimatedCostUsd: number): void {
+  const span = getActiveSpan();
+  if (span) {
+    span.setAttribute("gen_ai.usage.estimated_cost_usd", estimatedCostUsd);
+  }
+}
+
+// ============================================================================
+// Latency Tracking
+// ============================================================================
+
+/**
+ * Record GenAI latency breakdown on the active span
+ */
+export function recordGenAiLatency(latency: {
+  totalGenerationMs: number;
+  timeToFirstTokenMs?: number;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttribute("gen_ai.latency.total_generation_ms", latency.totalGenerationMs);
+
+  if (latency.timeToFirstTokenMs !== undefined) {
+    span.setAttribute("gen_ai.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
+  }
+}
+
+/**
+ * Record Slack API latency on the active span
+ */
+export function recordSlackLatency(latency: {
+  threadFetchMs?: number;
+  messagePostMs?: number;
+  messageUpdateMs?: number;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  if (latency.threadFetchMs !== undefined) {
+    span.setAttribute("slack.latency.thread_fetch_ms", latency.threadFetchMs);
+  }
+  if (latency.messagePostMs !== undefined) {
+    span.setAttribute("slack.latency.message_post_ms", latency.messagePostMs);
+  }
+  if (latency.messageUpdateMs !== undefined) {
+    span.setAttribute("slack.latency.message_update_ms", latency.messageUpdateMs);
+  }
+}
+
+// ============================================================================
+// Conversation Quality Signals
+// ============================================================================
+
+/**
+ * Record conversation quality signals on the active span
+ */
+export function recordConversationQuality(context: {
+  turnCount: number;
+  contextLength: number;
+  wasTruncated: boolean;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "conversation.turn_count": context.turnCount,
+    "conversation.context_length": context.contextLength,
+    "conversation.was_truncated": context.wasTruncated,
+  });
+}
+
+// ============================================================================
+// RAG/Knowledge Base Metrics
+// ============================================================================
+
+/**
+ * Record knowledge base retrieval metrics on the active span
+ */
+export function recordKnowledgeBaseMetrics(metrics: {
+  documentsCount: number;
+  totalCharacters?: number;
+  retrievalLatencyMs: number;
+  cacheHit: boolean;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  span.setAttributes({
+    "knowledge_base.documents_count": metrics.documentsCount,
+    "knowledge_base.retrieval_latency_ms": metrics.retrievalLatencyMs,
+    "knowledge_base.cache_hit": metrics.cacheHit,
+  });
+
+  if (metrics.totalCharacters !== undefined) {
+    span.setAttribute("knowledge_base.total_characters", metrics.totalCharacters);
+  }
+}
+
+// ============================================================================
+// Error Categorization
+// ============================================================================
+
+/**
+ * Error categories for classification
+ */
+export type ErrorCategory =
+  | "rate_limit"
+  | "auth"
+  | "timeout"
+  | "model_error"
+  | "invalid_request"
+  | "network"
+  | "internal"
+  | "unknown";
+
+/**
+ * Categorize an error based on its message and type
+ */
+export function categorizeError(error: Error): { category: ErrorCategory; retryable: boolean } {
+  const message = error.message.toLowerCase();
+  const name = error.name.toLowerCase();
+
+  // Rate limiting
+  if (message.includes("rate") || message.includes("429") || message.includes("too many")) {
+    return { category: "rate_limit", retryable: true };
+  }
+
+  // Authentication
+  if (message.includes("auth") || message.includes("401") || message.includes("403") ||
+      message.includes("unauthorized") || message.includes("forbidden")) {
+    return { category: "auth", retryable: false };
+  }
+
+  // Timeout
+  if (message.includes("timeout") || message.includes("timed out") || name.includes("timeout")) {
+    return { category: "timeout", retryable: true };
+  }
+
+  // Model errors (Claude-specific)
+  if (message.includes("overloaded") || message.includes("529") ||
+      message.includes("model") || message.includes("500")) {
+    return { category: "model_error", retryable: true };
+  }
+
+  // Invalid request
+  if (message.includes("invalid") || message.includes("400") || message.includes("bad request")) {
+    return { category: "invalid_request", retryable: false };
+  }
+
+  // Network errors
+  if (message.includes("network") || message.includes("fetch") ||
+      message.includes("connect") || name.includes("typeerror")) {
+    return { category: "network", retryable: true };
+  }
+
+  return { category: "unknown", retryable: false };
+}
+
+/**
+ * Record categorized error on the active span
+ * Enhances the basic recordError with categorization
+ */
+export function recordCategorizedError(error: Error, context?: string): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  const { category, retryable } = categorizeError(error);
+
+  span.setStatus({
+    code: SpanStatusCode.ERROR,
+    message: error.message,
+  });
+
+  span.setAttributes({
+    "error.type": error.name,
+    "error.category": category,
+    "error.retryable": retryable,
+  });
+
+  if (context) {
+    span.setAttribute("error.context", context);
+  }
+
+  span.recordException(error);
 }
