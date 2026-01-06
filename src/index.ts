@@ -174,6 +174,34 @@ function verifyApiKey(request: Request, env: Env): boolean {
 }
 
 /**
+ * Handle /api/test-checkin - trigger a test check-in DM
+ */
+async function handleTestCheckin(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Manual test check-in triggered via API");
+  const result = await sendWeeklyCheckins(env);
+
+  return new Response(JSON.stringify(result), {
+    status: result.success ? 200 : 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * Handle /api/docs requests for console-based document management
  */
 async function handleDocsApi(request: Request, env: Env): Promise<Response> {
@@ -368,6 +396,11 @@ export const handler = {
     // Route /api/docs to the docs API handler
     if (url.pathname === "/api/docs") {
       return handleDocsApi(request, env);
+    }
+
+    // Route /api/test-checkin to trigger manual check-in
+    if (url.pathname === "/api/test-checkin") {
+      return handleTestCheckin(request, env);
     }
 
     // Route /slack/slash to slash command handler

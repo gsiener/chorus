@@ -228,7 +228,7 @@ export async function postDirectMessage(
   userId: string,
   text: string,
   env: Env
-): Promise<string | null> {
+): Promise<{ ts: string | null; error?: string }> {
   try {
     const openData = await slackFetch<ConversationOpenResponse>(
       "https://slack.com/api/conversations.open",
@@ -241,11 +241,24 @@ export async function postDirectMessage(
     );
 
     if (!openData.channel) {
-      return null;
+      console.error(`conversations.open returned no channel for user ${userId}`);
+      return { ts: null, error: "no_channel_returned" };
     }
 
-    return postMessage(openData.channel.id, text, undefined, env);
-  } catch {
-    return null;
+    const ts = await postMessage(openData.channel.id, text, undefined, env);
+    if (!ts) {
+      console.error(`postMessage failed for user ${userId}`);
+      return { ts: null, error: "message_post_failed" };
+    }
+    return { ts };
+  } catch (error) {
+    const errorMessage =
+      error instanceof SlackApiError
+        ? error.code
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    console.error(`Failed to send DM to ${userId}: ${errorMessage}`);
+    return { ts: null, error: errorMessage };
   }
 }

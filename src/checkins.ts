@@ -189,7 +189,7 @@ export async function sendWeeklyCheckins(
 
         if (await shouldSendCheckin(testUser, env)) {
           const result = await postDirectMessage(testUser, testMessage, env);
-          if (result) {
+          if (result.ts) {
             await recordCheckin(testUser, env);
             return {
               success: true,
@@ -197,10 +197,10 @@ export async function sendWeeklyCheckins(
               sentTo: 1,
             };
           } else {
-            console.error(`Failed to send test check-in to ${testUser}`);
+            console.error(`Failed to send test check-in to ${testUser}: ${result.error}`);
             return {
               success: false,
-              message: "Failed to send test check-in DM.",
+              message: `Failed to send test check-in DM: ${result.error}`,
               sentTo: 0,
             };
           }
@@ -231,12 +231,12 @@ export async function sendWeeklyCheckins(
       const message = formatCheckinMessage(initiatives);
       const result = await postDirectMessage(ownerId, message, env);
 
-      if (result) {
+      if (result.ts) {
         await recordCheckin(ownerId, env);
         sentCount++;
         console.log(`Sent check-in to ${ownerId}`);
       } else {
-        console.error(`Failed to send check-in to ${ownerId}`);
+        console.error(`Failed to send check-in to ${ownerId}: ${result.error}`);
       }
     }
 

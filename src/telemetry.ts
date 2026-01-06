@@ -177,6 +177,57 @@ export function recordEmbeddingsMetrics(metrics: {
 }
 
 /**
+ * Record GenAI message content as span events
+ * Follows OTel GenAI semantic conventions for message capture
+ *
+ * Events:
+ * - gen_ai.system.message: System prompt
+ * - gen_ai.user.message: User messages
+ * - gen_ai.assistant.message: Assistant responses
+ */
+export function recordGenAiMessages(data: {
+  systemPrompt?: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  completion?: string;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  // Record system prompt as event
+  if (data.systemPrompt) {
+    span.addEvent("gen_ai.system.message", {
+      "gen_ai.system.message.content": data.systemPrompt,
+    });
+  }
+
+  // Record each message as an event
+  for (let i = 0; i < data.messages.length; i++) {
+    const msg = data.messages[i];
+    const eventName = msg.role === "user" ? "gen_ai.user.message" : "gen_ai.assistant.message";
+    span.addEvent(eventName, {
+      [`gen_ai.${msg.role}.message.content`]: msg.content,
+      "gen_ai.message.index": i,
+    });
+  }
+
+  // Record completion/response as event
+  if (data.completion) {
+    span.addEvent("gen_ai.assistant.message", {
+      "gen_ai.assistant.message.content": data.completion,
+      "gen_ai.message.index": data.messages.length,
+      "gen_ai.message.is_response": true,
+    });
+  }
+
+  // Also set as span attributes for easy querying
+  span.setAttributes({
+    "gen_ai.prompt.system_length": data.systemPrompt?.length ?? 0,
+    "gen_ai.prompt.messages_count": data.messages.length,
+    "gen_ai.completion.length": data.completion?.length ?? 0,
+  });
+}
+
+/**
  * Backward-compatible alias for recordGenAiMetrics
  * @deprecated Use recordGenAiMetrics instead
  */

@@ -2,7 +2,7 @@ import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
-import { recordGenAiMetrics } from "./telemetry";
+import { recordGenAiMetrics, recordGenAiMessages } from "./telemetry";
 import {
   getThreadContext,
   updateThreadContext,
@@ -185,6 +185,13 @@ export async function generateResponse(
     cacheReadInputTokens: data.usage?.cache_read_input_tokens,
   });
 
+  // Record full message content for GenAI observability
+  recordGenAiMessages({
+    systemPrompt: systemPrompt,
+    messages: processedMessages,
+    completion: rawText,
+  });
+
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
 
@@ -331,6 +338,13 @@ export async function generateResponseStreaming(
     maxTokens: CLAUDE_MAX_TOKENS,
     streaming: true,
     cacheHit: false,
+  });
+
+  // Record full message content for GenAI observability
+  recordGenAiMessages({
+    systemPrompt: systemPrompt,
+    messages,
+    completion: fullText,
   });
 
   // Cache the response

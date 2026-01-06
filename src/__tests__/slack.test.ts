@@ -352,7 +352,8 @@ describe("postDirectMessage", () => {
 
     const result = await postDirectMessage("U456", "Hello via DM!", mockEnv);
 
-    expect(result).toBe("1700000001.000000");
+    expect(result.ts).toBe("1700000001.000000");
+    expect(result.error).toBeUndefined();
 
     // First call opens DM
     expect(fetch).toHaveBeenNthCalledWith(
@@ -377,18 +378,19 @@ describe("postDirectMessage", () => {
     );
   });
 
-  it("returns null when DM channel cannot be opened", async () => {
+  it("returns error when DM channel cannot be opened", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: false, error: "user_not_found" }))
     );
 
     const result = await postDirectMessage("U456", "Hello!", mockEnv);
 
-    expect(result).toBeNull();
+    expect(result.ts).toBeNull();
+    expect(result.error).toBe("user_not_found");
     expect(fetch).toHaveBeenCalledTimes(1); // Should not attempt to post
   });
 
-  it("returns null when message post fails", async () => {
+  it("returns error when message post fails", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ ok: true, channel: { id: "D123" } }))
@@ -399,6 +401,7 @@ describe("postDirectMessage", () => {
 
     const result = await postDirectMessage("U456", "Hello!", mockEnv);
 
-    expect(result).toBeNull();
+    expect(result.ts).toBeNull();
+    expect(result.error).toBe("message_post_failed");
   });
 });
