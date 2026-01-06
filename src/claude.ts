@@ -2,7 +2,7 @@ import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { fetchWithRetry } from "./http-utils";
-import { recordGenAiMetrics, recordGenAiMessages } from "./telemetry";
+import { recordGenAiMetrics, recordGenAiInput, recordGenAiOutput } from "./telemetry";
 import {
   getThreadContext,
   updateThreadContext,
@@ -135,6 +135,12 @@ export async function generateResponse(
     systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
 
+  // Record input BEFORE the API call so attributes are captured
+  recordGenAiInput({
+    systemPrompt,
+    messages: processedMessages,
+  });
+
   const response = await fetchWithRetry(
     "https://api.anthropic.com/v1/messages",
     {
@@ -185,12 +191,8 @@ export async function generateResponse(
     cacheReadInputTokens: data.usage?.cache_read_input_tokens,
   });
 
-  // Record full message content for GenAI observability
-  recordGenAiMessages({
-    systemPrompt: systemPrompt,
-    messages: processedMessages,
-    completion: rawText,
-  });
+  // Record completion output (input was already recorded before API call)
+  recordGenAiOutput(rawText);
 
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });
@@ -256,6 +258,12 @@ export async function generateResponseStreaming(
   if (gapNudge) {
     systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
+
+  // Record input BEFORE the API call so attributes are captured
+  recordGenAiInput({
+    systemPrompt,
+    messages,
+  });
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -340,12 +348,8 @@ export async function generateResponseStreaming(
     cacheHit: false,
   });
 
-  // Record full message content for GenAI observability
-  recordGenAiMessages({
-    systemPrompt: systemPrompt,
-    messages,
-    completion: fullText,
-  });
+  // Record completion output (input was already recorded before API call)
+  recordGenAiOutput(fullText);
 
   // Cache the response
   await env.DOCS_KV.put(cacheKey, text, { expirationTtl: CACHE_TTL_SECONDS });

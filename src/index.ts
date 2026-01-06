@@ -202,6 +202,43 @@ async function handleTestCheckin(request: Request, env: Env): Promise<Response> 
 }
 
 /**
+ * Handle /api/test-telemetry - trigger a Claude call to test telemetry
+ */
+async function handleTestTelemetry(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Test telemetry triggered via API");
+
+  // Make a simple Claude API call to test telemetry
+  const messages = [{ role: "user" as const, content: "Say hello in exactly 3 words." }];
+  const result = await generateResponse(messages, env);
+
+  return new Response(JSON.stringify({
+    success: true,
+    response: result.text,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cached: result.cached,
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * Handle /api/docs requests for console-based document management
  */
 async function handleDocsApi(request: Request, env: Env): Promise<Response> {
@@ -401,6 +438,11 @@ export const handler = {
     // Route /api/test-checkin to trigger manual check-in
     if (url.pathname === "/api/test-checkin") {
       return handleTestCheckin(request, env);
+    }
+
+    // Route /api/test-telemetry to test Claude telemetry
+    if (url.pathname === "/api/test-telemetry") {
+      return handleTestTelemetry(request, env);
     }
 
     // Route /slack/slash to slash command handler

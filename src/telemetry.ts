@@ -4,19 +4,32 @@
  * Provides helpers for adding structured attributes to OpenTelemetry spans.
  * Uses the active span from the OTel context.
  *
- * Follows OTel GenAI Semantic Conventions v1.29.0:
- * https://opentelemetry.io/docs/specs/semconv/gen-ai/
+ * Follows OpenTelemetry Semantic Conventions:
+ * - General: https://opentelemetry.io/docs/specs/semconv/
+ * - GenAI v1.37.0+: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+ * - HTTP: https://opentelemetry.io/docs/specs/semconv/http/
+ * - Messaging: https://opentelemetry.io/docs/specs/semconv/messaging/
  *
- * Key semantic conventions used:
- * - gen_ai.system: The GenAI system identifier (e.g., "anthropic", "openai")
- * - gen_ai.request.model: Model name in the request
- * - gen_ai.response.model: Actual model name in response
- * - gen_ai.operation.name: Operation type ("chat", "embeddings", "text_completion")
+ * Attribute namespacing:
+ * - Standard OTel: gen_ai.*, http.*, error.*, etc.
+ * - Slack-specific: slack.* (custom namespace for Slack API context)
+ * - App-specific: chorus.* (custom namespace for Chorus features)
+ *
+ * GenAI semantic conventions:
+ * - gen_ai.system: Provider identifier (e.g., "anthropic", "openai")
+ * - gen_ai.operation.name: Operation type ("chat", "embeddings")
+ * - gen_ai.request.model: Model name in request
+ * - gen_ai.response.model: Actual model in response
  * - gen_ai.usage.input_tokens: Input token count
  * - gen_ai.usage.output_tokens: Output token count
- * - gen_ai.response.finish_reasons: Array of stop reasons
- * - gen_ai.request.max_tokens: Max tokens limit
- * - gen_ai.request.temperature: Sampling temperature
+ * - gen_ai.response.finish_reasons: Stop reasons array
+ * - gen_ai.system_instructions: System prompt content
+ * - gen_ai.input.messages: Serialized conversation messages
+ * - gen_ai.output.content: Generated completion
+ *
+ * Note: OTel spec recommends events for large payloads, but otel-cf-workers
+ * doesn't export span events. We use span attributes as Honeycomb handles
+ * high-cardinality string attributes well (wide events approach).
  */
 
 import { trace, SpanStatusCode, Span } from "@opentelemetry/api";
@@ -143,6 +156,31 @@ export function recordGenAiMetrics(metrics: {
   if (metrics.cacheReadInputTokens !== undefined) {
     span.setAttribute("gen_ai.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
   }
+
+  // Record any pending input data (stored earlier via recordGenAiInput)
+  if (_pendingGenAiInput) {
+    const data = _pendingGenAiInput;
+    _pendingGenAiInput = null; // Clear after use
+
+    // Truncate large values to avoid otel-cf-workers limits
+    const MAX_ATTR_LENGTH = 4096;
+    const truncate = (s: string) => s.length > MAX_ATTR_LENGTH ? s.slice(0, MAX_ATTR_LENGTH) + "..." : s;
+
+    // System instructions (OTel GenAI v1.37+ convention)
+    span.setAttribute("gen_ai.system_instructions", truncate(data.systemPrompt));
+    span.setAttribute("gen_ai.system_instructions.length", data.systemPrompt.length);
+
+    // Serialize messages as JSON for queryability (Honeycomb wide events approach)
+    const messagesJson = JSON.stringify(data.messages);
+    span.setAttribute("gen_ai.input.messages", truncate(messagesJson));
+    span.setAttribute("gen_ai.input.messages_count", data.messages.length);
+
+    // Message counts for filtering
+    const userCount = data.messages.filter((m) => m.role === "user").length;
+    const assistantCount = data.messages.filter((m) => m.role === "assistant").length;
+    span.setAttribute("gen_ai.input.user_message_count", userCount);
+    span.setAttribute("gen_ai.input.assistant_message_count", assistantCount);
+  }
 }
 
 /**
@@ -177,54 +215,71 @@ export function recordEmbeddingsMetrics(metrics: {
 }
 
 /**
- * Record GenAI message content as span events
- * Follows OTel GenAI semantic conventions for message capture
+ * Record GenAI input (system prompt + messages) as span attributes
+ * Call this BEFORE the API call so otel-cf-workers captures the attributes
  *
- * Events:
- * - gen_ai.system.message: System prompt
- * - gen_ai.user.message: User messages
- * - gen_ai.assistant.message: Assistant responses
+ * Uses OTel GenAI semantic conventions v1.37+:
+ * - gen_ai.system_instructions for system prompt
+ * - gen_ai.input.messages for serialized conversation
+ */
+export function recordGenAiInput(data: {
+  systemPrompt: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+}): void {
+  // Store for later recording after API call completes
+  // This is needed because otel-cf-workers may not export attributes set early in the request
+  _pendingGenAiInput = data;
+}
+
+// Pending input data to be recorded with metrics
+let _pendingGenAiInput: {
+  systemPrompt: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+} | null = null;
+
+/**
+ * Record GenAI output (completion) as span attribute
+ * Call this AFTER the API response but while span is still active
+ *
+ * Uses OTel GenAI semantic conventions v1.37+:
+ * - gen_ai.output.content for the generated text
+ */
+export function recordGenAiOutput(completion: string): void {
+  const span = getActiveSpan();
+  if (span) {
+    // Truncate to avoid otel-cf-workers limits
+    const MAX_ATTR_LENGTH = 4096;
+    const truncated = completion.length > MAX_ATTR_LENGTH
+      ? completion.slice(0, MAX_ATTR_LENGTH) + "..."
+      : completion;
+
+    // Set on span for Honeycomb wide events queryability
+    span.setAttribute("gen_ai.output.content", truncated);
+    span.setAttribute("gen_ai.output.content.length", completion.length);
+  }
+}
+
+/**
+ * Combined function to record both input and output GenAI content
+ * Useful for recording everything in one call after the API response
  */
 export function recordGenAiMessages(data: {
   systemPrompt?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   completion?: string;
 }): void {
-  const span = getActiveSpan();
-  if (!span) return;
-
-  // Record system prompt as event
+  // Record input if provided (may duplicate if recordGenAiInput was called earlier)
   if (data.systemPrompt) {
-    span.addEvent("gen_ai.system.message", {
-      "gen_ai.system.message.content": data.systemPrompt,
+    recordGenAiInput({
+      systemPrompt: data.systemPrompt,
+      messages: data.messages,
     });
   }
 
-  // Record each message as an event
-  for (let i = 0; i < data.messages.length; i++) {
-    const msg = data.messages[i];
-    const eventName = msg.role === "user" ? "gen_ai.user.message" : "gen_ai.assistant.message";
-    span.addEvent(eventName, {
-      [`gen_ai.${msg.role}.message.content`]: msg.content,
-      "gen_ai.message.index": i,
-    });
-  }
-
-  // Record completion/response as event
+  // Record output completion
   if (data.completion) {
-    span.addEvent("gen_ai.assistant.message", {
-      "gen_ai.assistant.message.content": data.completion,
-      "gen_ai.message.index": data.messages.length,
-      "gen_ai.message.is_response": true,
-    });
+    recordGenAiOutput(data.completion);
   }
-
-  // Also set as span attributes for easy querying
-  span.setAttributes({
-    "gen_ai.prompt.system_length": data.systemPrompt?.length ?? 0,
-    "gen_ai.prompt.messages_count": data.messages.length,
-    "gen_ai.completion.length": data.completion?.length ?? 0,
-  });
 }
 
 /**
