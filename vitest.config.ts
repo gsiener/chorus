@@ -35,6 +35,13 @@ export default defineWorkersConfig({
       workers: {
         // Use test config that excludes Vectorize/AI bindings (require remote mode)
         wrangler: { configPath: "./wrangler.test.toml" },
+        vite: {
+          resolve: {
+            alias: {
+              "node:os": "./src/empty.ts",
+            },
+          },
+        },
       },
     },
   },

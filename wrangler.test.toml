@@ -4,6 +4,9 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+[vars]
+OTEL_NODE_RESOURCE_DETECTORS = "none"
+
 # KV namespace for knowledge base documents (mocked in tests)
 [[kv_namespaces]]
 binding = "DOCS_KV"

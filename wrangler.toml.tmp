@@ -1,0 +1,23 @@
+name = "chorus"
+main = "src/index.ts"
+compatibility_date = "2023-08-01"
+
+[vars]
+SLACK_BOT_TOKEN = "your_slack_bot_token"
+SLACK_SIGNING_SECRET = "your_slack_signing_secret"
+ANTHROPIC_API_KEY = "your_anthropic_api_key"
+GEMINI_API_KEY = "your_gemini_api_key"
+HONEYCOMB_API_KEY = "your_honeycomb_api_key"
+LLM_MODEL = "gemini" # Set to "claude" or "gemini" to test
+
+[ai]
+binding = "AI"
+
+[vectorize]
+binding = "VECTORIZE"
+index_name = "chorus-embeddings"
+
+[kv_namespaces]
+binding = "DOCS_KV"
+id = "your_kv_namespace_id"
+preview_id = "your_kv_namespace_id" # Use the same ID for preview for now
