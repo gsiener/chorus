@@ -5,6 +5,7 @@ import {
   RateLimitError,
   ServerError,
   HttpError,
+  TimeoutError,
 } from "../http-utils";
 
 describe("fetchWithRetry", () => {
@@ -221,5 +222,12 @@ describe("typed errors", () => {
     const error = new HttpError(400, "Bad Request");
     expect(error._tag).toBe("HttpError");
     expect(error.status).toBe(400);
+  });
+
+  it("TimeoutError contains timeout duration", () => {
+    const error = new TimeoutError(25000);
+    expect(error._tag).toBe("TimeoutError");
+    expect(error.timeoutMs).toBe(25000);
+    expect(error.message).toBe("Request timed out after 25000ms");
   });
 });

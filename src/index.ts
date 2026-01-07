@@ -8,6 +8,7 @@ import {
 } from "./parseCommands";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse, ThreadInfo, CLAUDE_MODEL } from "./claude";
+import { TimeoutError } from "./http-utils";
 import { addDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
@@ -529,6 +530,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     "gen_ai.request.model": CLAUDE_MODEL,
   });
 
+  // Track thinking message for error handling
+  let thinkingTs: string | null = null;
+
   try {
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
@@ -867,7 +871,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
     // Post a "thinking" message with timing
     const postStart = Date.now();
-    const thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
+    thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
     const messagePostMs = Date.now() - postStart;
     recordSlackLatency({ messagePostMs });
 
@@ -903,12 +907,19 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     if (error instanceof Error) {
       recordCategorizedError(error, "handleMention");
     }
-    await postMessage(
-      channel,
-      "Sorry, I encountered an error processing your request.",
-      thread_ts ?? ts,
-      env
-    );
+
+    // Provide user-friendly message for timeout errors
+    let errorMessage = "Sorry, I encountered an error processing your request.";
+    if (error instanceof TimeoutError) {
+      errorMessage = "Sorry, my response took too long and timed out. This can happen with complex questions. Please try again or simplify your question.";
+    }
+
+    // Update the thinking message if it was posted, otherwise post a new message
+    if (thinkingTs) {
+      await updateMessage(channel, thinkingTs, errorMessage, env);
+    } else {
+      await postMessage(channel, errorMessage, thread_ts ?? ts, env);
+    }
   }
 }
 

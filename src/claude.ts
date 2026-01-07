@@ -1,7 +1,7 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
-import { fetchWithRetry } from "./http-utils";
+import { fetchWithRetry, TimeoutError } from "./http-utils";
 import {
   recordGenAiMetrics,
   recordGenAiInput,
@@ -64,6 +64,8 @@ function cleanSlackMessage(text: string, botUserId: string): string {
 
 export const CLAUDE_MODEL = "claude-opus-4-5-20251101";
 const CLAUDE_MAX_TOKENS = 1024;
+// Timeout for Claude API calls - leave margin before Cloudflare's 30s waitUntil limit
+const CLAUDE_API_TIMEOUT_MS = 25000;
 
 /**
  * Convert standard markdown to Slack's mrkdwn format
@@ -186,7 +188,7 @@ export async function generateResponse(
         messages: processedMessages,
       }),
     },
-    { initialDelayMs: 1000 }
+    { initialDelayMs: 1000, timeoutMs: CLAUDE_API_TIMEOUT_MS }
   );
   const apiLatencyMs = Date.now() - apiStartTime;
 

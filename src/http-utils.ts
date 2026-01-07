@@ -42,11 +42,20 @@ export class HttpError extends Error {
   }
 }
 
-export type FetchError = NetworkError | RateLimitError | ServerError | HttpError;
+export class TimeoutError extends Error {
+  readonly _tag = "TimeoutError" as const;
+  constructor(public readonly timeoutMs: number) {
+    super(`Request timed out after ${timeoutMs}ms`);
+    this.name = "TimeoutError";
+  }
+}
+
+export type FetchError = NetworkError | RateLimitError | ServerError | HttpError | TimeoutError;
 
 export interface RetryOptions {
   maxRetries?: number;
   initialDelayMs?: number;
+  timeoutMs?: number;
   shouldRetry?: (response: Response) => boolean;
 }
 
@@ -62,14 +71,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Fetch with retry and exponential backoff
+ * Fetch with retry, exponential backoff, and optional timeout
  */
 export async function fetchWithRetry(
   url: string,
   options: RequestInit,
   retryOptions: RetryOptions = {}
 ): Promise<Response> {
-  const { maxRetries = DEFAULT_MAX_RETRIES, initialDelayMs = DEFAULT_INITIAL_DELAY_MS } =
+  const { maxRetries = DEFAULT_MAX_RETRIES, initialDelayMs = DEFAULT_INITIAL_DELAY_MS, timeoutMs } =
     retryOptions;
 
   let lastError: Error | null = null;
@@ -77,7 +86,13 @@ export async function fetchWithRetry(
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      // Create abort controller for timeout if specified
+      const fetchOptions: RequestInit = { ...options };
+      if (timeoutMs) {
+        fetchOptions.signal = AbortSignal.timeout(timeoutMs);
+      }
+
+      const response = await fetch(url, fetchOptions);
 
       // Success - return immediately
       if (response.ok) {
@@ -98,6 +113,11 @@ export async function fetchWithRetry(
         await sleep(delay);
       }
     } catch (error) {
+      // Check if this is a timeout error
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new TimeoutError(timeoutMs!);
+      }
+
       // Network error - save and retry
       lastError = error instanceof Error ? error : new Error(String(error));
 
