@@ -819,3 +819,51 @@ src/tools.ts                        - NEW - Tool definitions for main flow
 3. **Complete Task 7 (Module splitting)** - Refactor index.ts to use new middleware module
 
 IMPLEMENTATION_EOF'
+---
+
+## Cleanup Update (Commit dde4390)
+
+### Tool Calling Cleanup Decision
+
+After creating `src/tools.ts` infrastructure, we determined:
+- Current context injection approach (injecting all relevant info into system prompt) is working well
+- Integrating tool calling would require significant refactoring of the Claude flow
+- The complexity/benefit ratio doesn't justify this change at this time
+
+**Decision:** Removed unused `src/tools.ts` file and marked Task 4 as **SKIPPED**.
+
+**Reasoning:**
+- Existing architecture already provides relevant context to Claude
+- Tool calling would reduce context window usage but increase code complexity
+- Priority should focus on other improvements with higher impact
+- Can revisit in future if token usage becomes a concern
+
+### Updated Status
+
+- Task 1 (Streaming): ✅ Completed
+- Task 2 (KV cache): ✅ Completed  
+- Task 3 (Request IDs): ✅ Completed
+- Task 4 (Tool calling): ❌ Skipped - Current approach sufficient
+- Task 5 (Circuit breakers): ✅ Completed
+- Task 6 (Idempotency): ✅ Completed
+- Task 7 (Module split): ⚠️ Partial - Middleware created, full refactor pending
+
+### Files in Final State
+
+```
+src/claude.ts                    - Exported constants
+src/http-utils.ts                  - Circuit breaker logic
+src/index.ts                       - Clean, no type errors
+src/telemetry.ts                   - Request ID support
+src/middleware/rate-limit.ts      - NEW - Rate limiting, dedup, idempotency
+TECHNICAL_ANALYSIS.md              - Complete documentation
+```
+
+### All Commits
+
+1. `828dabf` - Add comprehensive technical analysis and architecture audit
+2. `7a6343c` - Implement architectural improvements 1-3, 5-6
+3. `7a48eb5` - Update technical analysis with implementation status
+4. `dde4390` - Fix type errors from incomplete tool calling code
+
+CLEANUP_EOF'
