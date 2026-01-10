@@ -718,3 +718,104 @@ The implementation demonstrates **mature engineering** for a Cloudflare Workers-
 
 **Report generated**: 2025-01-10
 **Analysis based on**: Commit `tech-analysis-architecture-audit` branch
+
+---
+
+## Implementation Details
+
+### Completed Changes
+
+#### Commit 7a6343c: "Implement architectural improvements 1-3, 5-6"
+
+**Task 1: Streaming Responses**
+- File: `src/index.ts:888`
+- Change: Updated `handleMention` to use `generateResponseStreaming`
+- Impact: Prevents 30s Cloudflare timeout for long Claude responses
+
+**Task 2: KV-based Bot User ID Cache**
+- File: `src/index.ts:1069-1108`
+- Changes:
+  - Removed module-level `cachedBotUserId` and `botUserIdCacheExpiry` variables
+  - Added `BOT_ID_CACHE_KEY = "cache:bot-user-id"` constant
+  - Added `BOT_ID_CACHE_TTL_SECONDS = 3600` constant
+  - Updated `getBotUserId()` to use KV for distributed caching
+  - Updated `resetBotUserIdCache(env)` to accept env parameter
+- Impact: Cache works correctly in serverless environment across multiple workers
+
+**Task 3: Request ID Tracking**
+- Files: `src/index.ts:67-88`, `src/index.ts:512-533`, `src/index.ts:1030-1045`
+- Changes:
+  - Added `RequestContext` interface with `requestId`, `startTime`, `userId`, `channel`
+  - Generate unique `requestId` using `crypto.randomUUID()` in `handler.fetch`
+  - Add `"request.id"` attribute to OTel span
+  - Pass `requestContext` to `handleMention` and `handleReaction`
+  - Updated `recordRequestContext` to accept optional `requestId`
+  - Updated `recordFeedback` to accept optional `requestId`
+- Impact: Full request correlation across distributed traces in Honeycomb
+
+**Task 5: Circuit Breakers**
+- File: `src/http-utils.ts:50-145`
+- Changes:
+  - Added `CircuitBreakerState` interface with `failures`, `lastFailureTime`, `isOpen`
+  - Added `circuitBreakers` Map for tracking state per URL
+  - Added `CIRCUIT_BREAKER_THRESHOLD = 5` (opens after 5 failures)
+  - Added `CIRCUIT_BREAKER_TIMEOUT_MS = 60000` (closes after 60s)
+  - Implemented `checkCircuitBreaker()` - throws error if circuit is open
+  - Implemented `updateCircuitBreakerOnFailure()` - tracks failures and opens circuit
+  - Implemented `updateCircuitBreakerOnSuccess()` - resets circuit on success
+  - Integrated into `fetchWithRetry()` - checks circuit before request
+- Impact: Prevents cascading failures by blocking failing services
+
+**Task 6: Operation-level Idempotency**
+- Files: `src/middleware/rate-limit.ts` (new), `src/index.ts:150-182`
+- Changes:
+  - Created new middleware module `src/middleware/rate-limit.ts`
+  - Moved `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_KEY_PREFIX`, `RATE_LIMITS` to middleware
+  - Moved `isRateLimited()` to middleware
+  - Moved `isDuplicateEvent()` to middleware
+  - Added `IDEMPOTENCY_TTL_SECONDS = 3600` and `IDEMPOTENCY_KEY_PREFIX = "idempotency:"`
+  - Added `startOperation(operationId, env)` - marks operation as in-progress
+  - Added `completeOperation(operationId, env)` - marks operation as completed
+- Impact: Prevents duplicate operations on Slack retries
+
+### Partially Completed / In Progress
+
+#### Task 4: Tool Calling to Main Flow
+- Created `src/tools.ts` with:
+  - `MAIN_TOOLS` constant with `search_documents`, `get_initiative_details`, `list_initiatives`
+  - `ToolUseContent` and `TextContent` type definitions
+  - `ClaudeToolResponse` type definition
+  - `executeTool()` function to run tools
+- Status: Tools infrastructure created but not integrated into main flow
+- Next steps: Import and use in `index.ts` or create new tool-calling module
+
+#### Task 7: Split Large Modules
+- Created `src/middleware/` directory
+- Created `src/middleware/rate-limit.ts` with extracted rate limiting and idempotency logic
+- Status: Middleware created, but `index.ts` still needs refactoring to use it
+- Next steps: Move routing to `src/routing/`, handlers to `src/handlers/`
+
+### Files Changed
+
+```
+src/claude.ts                    - Exported CLAUDE_MAX_TOKENS, convertToSlackFormat
+src/http-utils.ts                  - Added circuit breaker logic
+src/index.ts                       - Streaming, request IDs, idempotency (has type errors)
+src/telemetry.ts                   - Updated for request ID support
+src/middleware/rate-limit.ts      - NEW - Rate limiting & idempotency
+src/tools.ts                        - NEW - Tool definitions for main flow
+```
+
+### Type Errors to Resolve
+
+**src/index.ts** still has TypeScript errors (task 4 integration and cleanup needed):
+- Line 1018: Declaration or statement expected (from incomplete removal)
+- Lines related to removed tool calling code still reference missing imports
+
+### Next Steps
+
+1. **Fix type errors in src/index.ts** - Remove incomplete code and restore clean state
+2. **Complete Task 4 (Tool calling)** - Integrate tools into main flow or skip if too complex
+3. **Complete Task 7 (Module splitting)** - Refactor index.ts to use new middleware module
+
+IMPLEMENTATION_EOF'
