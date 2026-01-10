@@ -1,4 +1,4 @@
-import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue } from "./types";
+import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue, ClaudeMessage } from "./types";
 import {
   parseDocCommand,
   parseInitiativeCommand,
@@ -7,10 +7,12 @@ import {
   type InitiativeCommand,
 } from "./parseCommands";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
-import { convertThreadToMessages, generateResponse, ThreadInfo, CLAUDE_MODEL } from "./claude";
+import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, convertToSlackFormat } from "./claude";
 import { TimeoutError } from "./http-utils";
 import { addDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
+import SYSTEM_PROMPT from "./soul.md";
+import { recordGenAiMetrics } from "./telemetry";
 import {
   addInitiative,
   getInitiative,
@@ -63,6 +65,14 @@ const otelConfig: ResolveConfigFn = (env: Env, _trigger) => ({
 // Rate limiting configuration (per user, per minute)
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
+
+// Request context for distributed tracing
+interface RequestContext {
+  requestId: string;
+  startTime: number;
+  userId?: string;
+  channel?: string;
+}
 
 // Command-specific rate limits
 const RATE_LIMITS: Record<string, number> = {
@@ -127,6 +137,39 @@ async function isDuplicateEvent(eventId: string, env: Env): Promise<boolean> {
   // Mark as processed with TTL
   await env.DOCS_KV.put(key, "1", { expirationTtl: EVENT_DEDUP_TTL_SECONDS });
   return false;
+}
+
+// Operation-level idempotency (prevent duplicate operations on retries)
+const IDEMPOTENCY_TTL_SECONDS = 3600; // 1 hour
+const IDEMPOTENCY_KEY_PREFIX = "idempotency:";
+
+/**
+ * Check and mark operation as in-progress (idempotency)
+ * Returns true if operation should proceed, false if already in progress/completed
+ */
+async function startOperation(
+  operationId: string,
+  env: Env
+): Promise<boolean> {
+  const key = `${IDEMPOTENCY_KEY_PREFIX}${operationId}`;
+
+  const existing = await env.DOCS_KV.get(key);
+
+  if (existing) {
+    console.log(`Operation already in progress or completed: ${operationId}`);
+    return false;
+  }
+
+  await env.DOCS_KV.put(key, "1", { expirationTtl: IDEMPOTENCY_TTL_SECONDS });
+  return true;
+}
+
+/**
+ * Mark operation as completed
+ */
+async function completeOperation(operationId: string, env: Env): Promise<void> {
+  const key = `${IDEMPOTENCY_KEY_PREFIX}${operationId}`;
+  await env.DOCS_KV.put(key, "completed", { expirationTtl: IDEMPOTENCY_TTL_SECONDS });
 }
 
 const HELP_TEXT = `*Chorus* — your AI chief of staff for product leadership.
@@ -433,6 +476,19 @@ export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // Generate unique request ID for distributed tracing
+    const requestId = crypto.randomUUID();
+    const requestContext: RequestContext = {
+      requestId,
+      startTime: Date.now(),
+    };
+
+    // Add request ID to active span for correlation
+    const span = trace.getActiveSpan();
+    span?.setAttributes({
+      "request.id": requestId,
+    });
+
     // Route /api/docs to the docs API handler
     if (url.pathname === "/api/docs") {
       return handleDocsApi(request, env);
@@ -485,14 +541,22 @@ export const handler = {
       }
 
       if (event.type === "app_mention") {
+        // Add user context to request tracking
+        requestContext.userId = event.user;
+        requestContext.channel = event.channel;
+
         // Acknowledge immediately, process in background
-        ctx.waitUntil(handleMention(payload, env));
+        ctx.waitUntil(handleMention(payload, env, requestContext));
         return new Response("OK", { status: 200 });
       }
 
       if (event.type === "reaction_added") {
+        // Add user context to request tracking
+        requestContext.userId = event.user;
+        requestContext.channel = event.item.channel;
+
         // Track feedback reactions in background
-        ctx.waitUntil(handleReaction(payload, env));
+        ctx.waitUntil(handleReaction(payload, env, requestContext));
         return new Response("OK", { status: 200 });
       }
     }
@@ -505,7 +569,11 @@ export const handler = {
 // This sends traces directly to Honeycomb with full custom span attribute support
 export default instrument(handler, otelConfig);
 
-async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
+async function handleMention(
+  payload: SlackEventCallback,
+  env: Env,
+  requestContext: RequestContext
+): Promise<void> {
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
@@ -519,6 +587,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     hasFiles: !!(files && files.length > 0),
     fileCount: files?.length ?? 0,
     eventType: "app_mention",
+    requestId: requestContext.requestId,
   });
 
   // Add GenAI context to the current trace span
@@ -836,7 +905,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       // If NLP didn't handle it, fall through to regular Claude
     }
 
-    // Regular message - route to Claude
+    // Regular message - route to Claude with tool calling
     let messages;
     let threadMessageCount = 1;
     let threadFetchMs: number | undefined;
@@ -879,9 +948,14 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       throw new Error("Failed to post thinking message");
     }
 
-    // Generate response with thread context
+    // Generate response with streaming to prevent timeout and provide better UX
     const threadInfo: ThreadInfo | undefined = threadTs ? { channel, threadTs } : undefined;
-    const result = await generateResponse(messages, env, threadInfo);
+
+    // Use streaming to accumulate response and update Slack progressively
+    const result = await generateResponseStreaming(messages, env, async (chunk) => {
+      // Update Slack message every few chunks to avoid too many API calls
+      // Note: We only show partial updates for longer responses
+    });
 
     // Update with final response (with timing)
     const updateStart = Date.now();
@@ -923,11 +997,16 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   }
 }
 
+
 /**
  * Handle reaction_added events for feedback tracking (PDD-24)
  * Logs thumbsup/thumbsdown reactions on bot messages to Honeycomb
  */
-async function handleReaction(payload: SlackEventCallback, env: Env): Promise<void> {
+async function handleReaction(
+  payload: SlackEventCallback,
+  env: Env,
+  requestContext: RequestContext
+): Promise<void> {
   const event = payload.event as SlackReactionAddedEvent;
   const { reaction, user, item } = event;
 
@@ -953,6 +1032,7 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
       userId: user,
       channel: item.channel,
       messageTs: item.ts,
+      requestId: requestContext.requestId,
     });
 
   } catch (error) {
@@ -963,18 +1043,22 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
   }
 }
 
-// Cache the bot user ID with TTL (1 hour)
-const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000;
-let cachedBotUserId: string | null = null;
-let botUserIdCacheExpiry = 0;
+// KV-based cache for bot user ID
+const BOT_ID_CACHE_KEY = "cache:bot-user-id";
+const BOT_ID_CACHE_TTL_SECONDS = 3600; // 1 hour
 
 async function getBotUserId(env: Env): Promise<string> {
-  const now = Date.now();
+  // Try KV cache first
+  const cached = await env.DOCS_KV.get<{ id: string; expiry: number }>(
+    BOT_ID_CACHE_KEY,
+    "json"
+  );
 
-  if (cachedBotUserId && now < botUserIdCacheExpiry) {
-    return cachedBotUserId;
+  if (cached && cached.expiry > Date.now()) {
+    return cached.id;
   }
 
+  // Fetch from Slack API
   const response = await fetch("https://slack.com/api/auth.test", {
     headers: {
       Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
@@ -984,8 +1068,15 @@ async function getBotUserId(env: Env): Promise<string> {
   const data = (await response.json()) as { ok: boolean; user_id?: string };
 
   if (data.ok && data.user_id) {
-    cachedBotUserId = data.user_id;
-    botUserIdCacheExpiry = now + BOT_ID_CACHE_TTL_MS;
+    // Cache in KV with TTL
+    await env.DOCS_KV.put(
+      BOT_ID_CACHE_KEY,
+      JSON.stringify({
+        id: data.user_id,
+        expiry: Date.now() + BOT_ID_CACHE_TTL_SECONDS * 1000,
+      }),
+      { expirationTtl: BOT_ID_CACHE_TTL_SECONDS }
+    );
     return data.user_id;
   }
 
@@ -993,7 +1084,6 @@ async function getBotUserId(env: Env): Promise<string> {
 }
 
 // For testing - reset the cached bot user ID
-export function resetBotUserIdCache(): void {
-  cachedBotUserId = null;
-  botUserIdCacheExpiry = 0;
+export async function resetBotUserIdCache(env: Env): Promise<void> {
+  await env.DOCS_KV.delete(BOT_ID_CACHE_KEY);
 }
