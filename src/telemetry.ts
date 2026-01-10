@@ -459,11 +459,15 @@ export function recordRequestContext(context: {
   fileCount: number;
   // Event type
   eventType: "app_mention" | "reaction_added" | "scheduled";
+  // Request tracking
+  requestId?: string;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
 
   span.setAttributes({
+    // Request correlation
+    "request.id": context.requestId ?? "",
     // User context
     "slack.user_id": context.userId,
     "slack.channel": context.channel,
@@ -631,18 +635,20 @@ export function recordRateLimit(context: {
  * @param attributes - Additional context about the feedback
  */
 export function recordFeedback(
-  feedback: "positive" | "negative",
-  attributes: {
-    reaction: string;
-    userId: string;
-    channel: string;
-    messageTs: string;
-  }
-): void {
+   feedback: "positive" | "negative",
+   attributes: {
+     reaction: string;
+     userId: string;
+     channel: string;
+     messageTs: string;
+     requestId?: string;
+   }
+ ): void {
   const span = getActiveSpan();
 
   // Set span attributes for filtering/grouping in traces (primary method)
   span?.setAttributes({
+    "request.id": attributes.requestId ?? "",
     "chorus.feedback": feedback,
     "chorus.feedback.message_ts": attributes.messageTs,
     "slack.event_type": "reaction_added",

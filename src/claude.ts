@@ -63,14 +63,14 @@ function cleanSlackMessage(text: string, botUserId: string): string {
 }
 
 export const CLAUDE_MODEL = "claude-opus-4-5-20251101";
-const CLAUDE_MAX_TOKENS = 1024;
+export const CLAUDE_MAX_TOKENS = 1024;
 // Timeout for Claude API calls - leave margin before Cloudflare's 30s waitUntil limit
 const CLAUDE_API_TIMEOUT_MS = 25000;
 
 /**
  * Convert standard markdown to Slack's mrkdwn format
  */
-function convertToSlackFormat(text: string): string {
+export function convertToSlackFormat(text: string): string {
   return text
     // Convert **bold** to *bold* (must do before single asterisk handling)
     .replace(/\*\*([^*]+)\*\*/g, '*$1*')
