@@ -83,6 +83,20 @@ Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using C
 
 ## Architecture
 
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the comprehensive system design documentation.
+
+**When to reference ARCHITECTURE.md:**
+- Before making significant design decisions or adding new modules
+- When modifying data flow between components
+- When adding new integrations or storage patterns
+
+**When to update ARCHITECTURE.md:**
+- After adding new modules or major features
+- After changing data models or storage patterns
+- After adding new external integrations
+- After modifying the request flow or entry points
+
+**Quick reference:**
 ```
 @mention → Cloudflare Worker → ack immediately (200)
                             → waitUntil: fetch thread → Claude API → post response
@@ -93,13 +107,6 @@ Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using C
 - `src/slack.ts` - Slack API: signature verification, thread fetching, message posting
 - `src/claude.ts` - Claude API integration, system prompt, message format conversion
 - `src/types.ts` - TypeScript interfaces for Slack events and API responses
-
-**Flow for @mentions:**
-1. Slack POSTs to worker with `app_mention` event
-2. Worker verifies signature, returns 200 immediately
-3. `waitUntil()` continues: fetches thread history if in a thread
-4. Converts Slack messages to Claude format, calls Claude API
-5. Posts response back to Slack in the same thread
 
 ## Environment Secrets
 
