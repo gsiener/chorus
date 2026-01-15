@@ -1,5 +1,7 @@
 # Chorus
 
+[![CI/CD](https://github.com/gsiener/chorus/actions/workflows/ci.yml/badge.svg)](https://github.com/gsiener/chorus/actions/workflows/ci.yml)
+
 An AI-powered Slack bot that answers questions about product roadmap, strategy, and internal knowledge. Powered by Claude.
 
 ## Talking to Chorus
