@@ -1,6 +1,7 @@
 # Chorus
 
 [![CI/CD](https://github.com/gsiener/chorus/actions/workflows/ci.yml/badge.svg)](https://github.com/gsiener/chorus/actions/workflows/ci.yml)
+[![Certified Shovelware](https://justin.searls.co/img/shovelware.svg)](https://justin.searls.co/shovelware/)
 
 An AI-powered Slack bot that answers questions about product roadmap, strategy, and internal knowledge. Powered by Claude.
 
