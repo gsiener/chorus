@@ -2,6 +2,9 @@
   "name": "chorus",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "./scripts/deploy.sh",
@@ -14,12 +17,12 @@
     "test:quality": "vitest run --config vitest.quality.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.11.1",
-    "@cloudflare/workers-types": "^4.20241205.0",
-    "@types/node": "^25.0.3",
+    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/workers-types": "^4.20260120.0",
+    "@types/node": "^22.15.0",
     "typescript": "^5.7.2",
     "vitest": "3.2.x",
-    "wrangler": "^4.56.0"
+    "wrangler": "^4.59.3"
   },
   "dependencies": {
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
