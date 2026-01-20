@@ -102,6 +102,32 @@ describe("Thread Context", () => {
       expect(contextPrefix).toContain("Previous Conversation Context");
     });
 
+    it("includes persona reminder in long thread context to prevent drift", () => {
+      const messages: ClaudeMessage[] = [];
+      for (let i = 0; i < 12; i++) {
+        messages.push({ role: "user", content: `Question ${i}` });
+        messages.push({ role: "assistant", content: `Answer ${i}` });
+      }
+
+      const { contextPrefix, wasTruncated } = processMessagesForContext(messages, null);
+
+      expect(wasTruncated).toBe(true);
+      expect(contextPrefix).toContain("You are Chorus, a professional product leadership advisor");
+      expect(contextPrefix).toContain("Stay grounded in that role");
+    });
+
+    it("does not include persona reminder for short threads", () => {
+      const messages: ClaudeMessage[] = [
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi there!" },
+      ];
+
+      const { contextPrefix, wasTruncated } = processMessagesForContext(messages, null);
+
+      expect(wasTruncated).toBe(false);
+      expect(contextPrefix).toBeNull();
+    });
+
     it("uses existing context summary when available", () => {
       const messages: ClaudeMessage[] = [];
       for (let i = 0; i < 12; i++) {

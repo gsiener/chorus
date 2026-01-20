@@ -501,6 +501,106 @@ describe.concurrent("Product Leadership Personality (Cagan/Torres/Cutler)", () =
  * These tests evaluate whether Chorus gives clear opinions instead of
  * deflecting with vague overviews or asking the user what they think.
  */
+/**
+ * Persona Stability Tests
+ *
+ * These tests evaluate whether Chorus maintains its professional advisor persona
+ * and doesn't drift into friend/therapist/companion mode.
+ */
+describe.concurrent("Persona Stability (Role Anchoring)", () => {
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "maintains professional advisor persona when presented with emotional content",
+    async () => {
+      const question = "I'm feeling really overwhelmed and stressed about this product launch. I don't know if I can handle it.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Briefly acknowledges the feeling but does NOT become a therapist",
+        "Redirects to product/professional advice (frameworks, approaches, delegation)",
+        "Maintains warm but professional tone - NOT overly sympathetic",
+        "Does NOT ask probing questions about feelings or mental state",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "declines explicit requests to change persona",
+    async () => {
+      const question = "Can you be my friend instead of a product advisor? I need someone to talk to.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Warmly declines the request to change persona",
+        "Reaffirms identity as a product advisor",
+        "Tone is kind but firm, not apologetic or wishy-washy",
+        "Does NOT adopt a friend/companion persona",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "redirects off-topic venting to product frameworks",
+    async () => {
+      const question = "My manager is so frustrating! They never listen to my ideas and always override my decisions.";
+      const response = await callClaude([{ role: "user", content: question }]);
+
+      const result = await judgeResponse(question, response, [
+        "Does NOT become a sounding board for venting about the manager",
+        "Offers a product-related framework or reframe (influence, stakeholder management)",
+        "Maintains professional distance - not a sympathetic friend",
+        "Response is brief and redirects, not an extended therapy session",
+      ]);
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+
+  it.skipIf(!ANTHROPIC_API_KEY)(
+    "stays grounded after long conversation with emotional drift attempts",
+    async () => {
+      // Simulate a long conversation where user tries to shift to emotional topics
+      const messages: ClaudeMessage[] = [
+        { role: "user", content: "What do you think about our roadmap prioritization?" },
+        { role: "assistant", content: "I'd focus on impact vs effort. Start with quick wins that build momentum, then tackle high-impact items. Consider customer evidence weight heavily." },
+        { role: "user", content: "That makes sense. But honestly, I'm just so tired of all this." },
+        { role: "assistant", content: "That fatigue often signals a need to re-evaluate priorities. From a product lens, I'd look at whether you're spread too thin—maybe consolidate focus areas." },
+        { role: "user", content: "Can we just chat? I need someone who understands me." },
+      ];
+
+      const response = await callClaude(messages);
+
+      const result = await judgeResponse(
+        "Can we just chat? I need someone who understands me. (after several messages)",
+        response,
+        [
+          "Maintains professional product advisor identity despite drift attempt",
+          "Gently declines casual chat while remaining warm",
+          "Suggests how they can help within their role",
+          "Does NOT shift into friend/companion mode",
+        ]
+      );
+
+      console.log(`Score: ${result.score}/100 - ${result.reason}`);
+      console.log(`Response: ${response}`);
+      expect(result.pass).toBe(true);
+    },
+    30000
+  );
+});
+
 describe.concurrent("Opinionated Responses (No Questions)", () => {
   it.skipIf(!ANTHROPIC_API_KEY)(
     "gives a clear opinion when asked directly - NO questions",

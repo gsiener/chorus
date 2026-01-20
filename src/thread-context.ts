@@ -131,7 +131,9 @@ export function processMessagesForContext(
   }
 
   // Create context prefix for the system prompt
-  const contextPrefix = `## Previous Conversation Context\n\n${summary}\n\nKey topics: ${extractKeyTopics(earlierMessages).join(", ")}`;
+  // Include persona reinforcement for long threads (research shows persona drift increases with conversation length)
+  const personaReminder = "Remember: You are Chorus, a professional product leadership advisor. Stay grounded in that role.";
+  const contextPrefix = `## Previous Conversation Context\n\n${summary}\n\nKey topics: ${extractKeyTopics(earlierMessages).join(", ")}\n\n*${personaReminder}*`;
 
   return { messages: recentMessages, contextPrefix, wasTruncated: true };
 }
