@@ -113,28 +113,19 @@ describe("fetchWithRetry", () => {
   });
 
   it("throws network error after max retries", async () => {
-    const mockFetch = vi.fn().mockImplementation(() =>
-      Promise.reject(new Error("Persistent network error"))
-    );
+    // Use real timers for this test to avoid unhandled rejection race conditions
+    vi.useRealTimers();
 
+    const mockFetch = vi.fn().mockRejectedValue(new Error("Persistent network error"));
     vi.stubGlobal("fetch", mockFetch);
 
-    const responsePromise = fetchWithRetry("https://example.com", {}, {
-      maxRetries: 3,
-      initialDelayMs: 100,
-    });
+    await expect(
+      fetchWithRetry("https://example.com", {}, {
+        maxRetries: 3,
+        initialDelayMs: 1, // Use minimal delay with real timers
+      })
+    ).rejects.toThrow("Persistent network error");
 
-    await vi.runAllTimersAsync();
-
-    let error: Error | null = null;
-    try {
-      await responsePromise;
-    } catch (e) {
-      error = e as Error;
-    }
-
-    expect(error).not.toBeNull();
-    expect(error?.message).toBe("Persistent network error");
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
