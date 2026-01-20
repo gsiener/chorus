@@ -1,4 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Mock OpenTelemetry to avoid node:os import issues in Workers pool
+vi.mock("@opentelemetry/api", () => ({
+  trace: {
+    getTracer: () => ({
+      startActiveSpan: (_name: string, fn: (span: { end: () => void; setAttribute: () => void; setStatus: () => void }) => unknown) =>
+        fn({ end: () => {}, setAttribute: () => {}, setStatus: () => {} }),
+    }),
+    getActiveSpan: () => ({ setAttribute: () => {}, setStatus: () => {}, end: () => {} }),
+  },
+  SpanStatusCode: { ERROR: 2, OK: 1 },
+}));
+
+vi.mock("@microlabs/otel-cf-workers", () => ({
+  instrument: (handler: unknown) => handler,
+}));
+
 import { handler, resetBotUserIdCache } from "../index";
 import type { Env } from "../types";
 
