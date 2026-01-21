@@ -102,7 +102,7 @@ jobs:
           output-file: dist/sbom.spdx.json
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        uses: actions/attest-build-provenance@00014ed6ed5efc5b1ab7f7f34a39eb55d41aa4f8 # v2
         with:
           subject-path: dist/*
 
