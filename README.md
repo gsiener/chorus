@@ -4,6 +4,8 @@
 [![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
 [![Certified Shovelware](https://justin.searls.co/img/shovelware.svg)](https://justin.searls.co/shovelware/)
 
+![Chorus](chorus.jpg)
+
 An AI-powered Slack bot that answers questions about product roadmap, strategy, and internal knowledge. Powered by Claude.
 
 ## Talking to Chorus
