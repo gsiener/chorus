@@ -1,6 +1,7 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
+import { getPrioritiesContext } from "./linear-priorities";
 import { fetchWithRetry, TimeoutError } from "./http-utils";
 import {
   recordGenAiMetrics,
@@ -121,11 +122,12 @@ export async function generateResponse(
     threadContext
   );
 
-  // Load full knowledge base, initiatives context, and detect gaps in parallel
+  // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
   const kbStartTime = Date.now();
-  const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
     getInitiativesContext(env),
+    getPrioritiesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
@@ -155,6 +157,9 @@ export async function generateResponse(
     console.log(`Using thread context summary (${messages.length} messages -> ${processedMessages.length} recent)`);
   }
 
+  if (prioritiesContext) {
+    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\n${prioritiesContext}`;
+  }
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
@@ -281,11 +286,12 @@ export async function generateResponseStreaming(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
-  // Load full knowledge base, initiatives context, and detect gaps in parallel
+  // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
   const kbStartTime = Date.now();
-  const [knowledgeBase, initiativesContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
     getInitiativesContext(env),
+    getPrioritiesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
@@ -308,6 +314,9 @@ export async function generateResponseStreaming(
   });
 
   let systemPrompt = SYSTEM_PROMPT;
+  if (prioritiesContext) {
+    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\n${prioritiesContext}`;
+  }
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
   }
