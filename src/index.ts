@@ -307,6 +307,60 @@ async function handleTestTelemetry(request: Request, env: Env): Promise<Response
 }
 
 /**
+ * Handle /api/ask - ask Chorus a question directly via API
+ */
+async function handleAsk(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  let body: { question?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (!body.question) {
+    return new Response(JSON.stringify({ error: "Missing required field: question" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Ask API triggered:", body.question);
+
+  const messages = [{ role: "user" as const, content: body.question }];
+  const result = await generateResponse(messages, env);
+
+  return new Response(JSON.stringify({
+    success: true,
+    question: body.question,
+    response: result.text,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cached: result.cached,
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * Handle /api/docs requests for console-based document management
  */
 async function handleDocsApi(request: Request, env: Env): Promise<Response> {
@@ -516,6 +570,11 @@ export const handler = {
     // Route /api/debug/priorities to debug Linear priorities
     if (url.pathname === "/api/debug/priorities") {
       return handleDebugPriorities(request, env);
+    }
+
+    // Route /api/ask to ask Chorus a question directly
+    if (url.pathname === "/api/ask") {
+      return handleAsk(request, env);
     }
 
     // Route /slack/slash to slash command handler
