@@ -133,11 +133,13 @@ For each of the 12 initiatives in the mapping:
 4. Set `targetDate` to match target quarter
 5. Verify projects are linked
 
-### Phase 2: Create Roadmap
+### Phase 2: Create Parent Initiative
 
-1. Create roadmap: "R&D Priorities 2026"
-2. Add all priority-related projects with `sortOrder` matching stack rank
-3. Set roadmap owner (Graham Siener / PDD Leadership)
+Note: Linear deprecated Roadmaps in favor of Initiatives, so we use initiative relations instead.
+
+1. Created parent initiative: "R&D Priorities 2026"
+2. Linked all 13 priority initiatives via `initiativeRelationCreate` with `sortOrder`
+3. URL: https://linear.app/honeycombio/initiative/randd-priorities-2026-a50c79278bc2
 
 ### Phase 3: Wire Up Chorus
 
@@ -182,7 +184,7 @@ After implementation, Chorus should handle:
 
 ## Success Criteria
 
-- [ ] All 12 initiatives updated with naming convention and metadata
-- [ ] Roadmap created with all priority projects
-- [ ] Chorus can answer basic priority queries
+- [x] All 13 initiatives updated with theme and tech risk metadata
+- [x] Parent initiative "R&D Priorities 2026" created with relations to all 13
+- [x] Chorus can answer basic priority queries (via linear-priorities.ts)
 - [ ] Google Sheet marked as deprecated
