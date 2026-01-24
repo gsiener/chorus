@@ -42,11 +42,12 @@ interface InitiativeRelation {
 
 interface LinearResponse {
   data?: {
-    initiative?: {
-      name: string;
-      relations: {
-        nodes: InitiativeRelation[];
-      };
+    initiativeRelations?: {
+      nodes: Array<{
+        sortOrder: number;
+        initiative: { id: string };
+        relatedInitiative: LinearInitiative;
+      }>;
     };
   };
   errors?: Array<{ message: string }>;
@@ -83,28 +84,29 @@ export async function fetchPriorityInitiatives(
     return [];
   }
 
+  // Query initiativeRelations directly and filter by our parent initiative
   const query = `{
-    initiative(id: "${RD_PRIORITIES_INITIATIVE_ID}") {
-      name
-      relations {
-        nodes {
-          sortOrder
-          relatedInitiative {
-            id
+    initiativeRelations(first: 50) {
+      nodes {
+        sortOrder
+        initiative {
+          id
+        }
+        relatedInitiative {
+          id
+          name
+          description
+          status
+          targetDate
+          content
+          owner {
             name
-            description
-            status
-            targetDate
-            content
-            owner {
+          }
+          projects(first: 10) {
+            nodes {
               name
-            }
-            projects(first: 10) {
-              nodes {
-                name
-                status { name }
-                progress
-              }
+              status { name }
+              progress
             }
           }
         }
@@ -133,9 +135,17 @@ export async function fetchPriorityInitiatives(
     return [];
   }
 
+  // Filter to only relations from our R&D Priorities initiative
+  const allRelations = data.data?.initiativeRelations?.nodes || [];
+  const priorityRelations = allRelations
+    .filter((r) => r.initiative.id === RD_PRIORITIES_INITIATIVE_ID)
+    .map((r) => ({
+      sortOrder: r.sortOrder,
+      relatedInitiative: r.relatedInitiative,
+    }));
+
   // Sort by sortOrder
-  const relations = data.data?.initiative?.relations.nodes || [];
-  return relations.sort((a, b) => a.sortOrder - b.sortOrder);
+  return priorityRelations.sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 /**
