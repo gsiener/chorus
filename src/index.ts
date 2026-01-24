@@ -29,6 +29,7 @@ import {
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
+import { getPrioritiesContext, fetchPriorityInitiatives } from "./linear-priorities";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
@@ -202,6 +203,70 @@ async function handleTestCheckin(request: Request, env: Env): Promise<Response> 
     status: result.success ? 200 : 500,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+/**
+ * Handle /api/debug/priorities - debug Linear priorities integration
+ */
+async function handleDebugPriorities(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "GET") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Debug priorities triggered via API");
+
+  try {
+    // First, check if LINEAR_API_KEY is configured
+    if (!env.LINEAR_API_KEY) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "LINEAR_API_KEY not configured",
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Fetch raw relations
+    const relations = await fetchPriorityInitiatives(env);
+
+    // Also fetch the formatted context
+    const context = await getPrioritiesContext(env);
+
+    return new Response(JSON.stringify({
+      success: true,
+      relationsCount: relations.length,
+      relations: relations.map(r => ({
+        sortOrder: r.sortOrder,
+        name: r.relatedInitiative.name,
+        status: r.relatedInitiative.status,
+        owner: r.relatedInitiative.owner?.name,
+      })),
+      formattedContext: context,
+    }, null, 2), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }
 
 /**
@@ -446,6 +511,11 @@ export const handler = {
     // Route /api/test-telemetry to test Claude telemetry
     if (url.pathname === "/api/test-telemetry") {
       return handleTestTelemetry(request, env);
+    }
+
+    // Route /api/debug/priorities to debug Linear priorities
+    if (url.pathname === "/api/debug/priorities") {
+      return handleDebugPriorities(request, env);
     }
 
     // Route /slack/slash to slash command handler
