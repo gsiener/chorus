@@ -29,7 +29,7 @@ import {
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
-import { getPrioritiesContext, fetchPriorityInitiatives } from "./linear-priorities";
+import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
@@ -226,6 +226,10 @@ async function handleDebugPriorities(request: Request, env: Env): Promise<Respon
 
   console.log("Debug priorities triggered via API");
 
+  // Check for refresh parameter
+  const url = new URL(request.url);
+  const shouldRefresh = url.searchParams.get("refresh") === "1";
+
   try {
     // First, check if LINEAR_API_KEY is configured
     if (!env.LINEAR_API_KEY) {
@@ -238,10 +242,16 @@ async function handleDebugPriorities(request: Request, env: Env): Promise<Respon
       });
     }
 
+    // Clear cache if refresh requested
+    if (shouldRefresh) {
+      await clearPrioritiesCache(env);
+      console.log("Cache cleared due to refresh parameter");
+    }
+
     // Fetch raw relations
     const relations = await fetchPriorityInitiatives(env);
 
-    // Also fetch the formatted context
+    // Also fetch the formatted context (will re-fetch from Linear if cache was cleared)
     const context = await getPrioritiesContext(env);
 
     return new Response(JSON.stringify({
@@ -252,6 +262,7 @@ async function handleDebugPriorities(request: Request, env: Env): Promise<Respon
         name: r.relatedInitiative.name,
         status: r.relatedInitiative.status,
         owner: r.relatedInitiative.owner?.name,
+        url: r.relatedInitiative.url,
       })),
       formattedContext: context,
     }, null, 2), {

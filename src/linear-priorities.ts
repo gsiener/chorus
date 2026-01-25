@@ -180,8 +180,7 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
           )
         : null;
 
-    lines.push(`### #${rank}: ${init.name}`);
-    lines.push(`- **Linear**: ${init.url}`);
+    lines.push(`### #${rank}: [${init.name}](${init.url})`);
     lines.push(`- **Status**: ${init.status}`);
     if (init.owner) {
       lines.push(`- **Owner**: ${init.owner.name}`);
@@ -207,6 +206,14 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Clear the priorities cache
+ */
+export async function clearPrioritiesCache(env: Env): Promise<void> {
+  await env.DOCS_KV.delete(CACHE_KEY);
+  console.log("Priorities cache cleared");
 }
 
 /**
