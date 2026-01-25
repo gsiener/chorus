@@ -22,6 +22,7 @@ interface LinearInitiative {
   description: string | null;
   status: string;
   targetDate: string | null;
+  url: string;
   owner: {
     name: string;
   } | null;
@@ -98,6 +99,7 @@ export async function fetchPriorityInitiatives(
           description
           status
           targetDate
+          url
           content
           owner {
             name
@@ -179,6 +181,7 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
         : null;
 
     lines.push(`### #${rank}: ${init.name}`);
+    lines.push(`- **Linear**: ${init.url}`);
     lines.push(`- **Status**: ${init.status}`);
     if (init.owner) {
       lines.push(`- **Owner**: ${init.owner.name}`);
