@@ -64,7 +64,8 @@ function extractPriorityMetadata(initiative: LinearInitiative): {
   const text = `${initiative.description || ""}\n${initiative.content || ""}`;
 
   // Extract tech risk (look for pepper emojis)
-  const riskMatch = text.match(/Tech Risk:\s*(🌶+)/);
+  // Note: Using character class [🌶️]+ to handle emoji variation selectors properly
+  const riskMatch = text.match(/Tech Risk:\s*([🌶️]+)/);
   const techRisk = riskMatch ? riskMatch[1] : null;
 
   // Extract theme
@@ -180,7 +181,7 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
           )
         : null;
 
-    lines.push(`### #${rank}: [${init.name}](${init.url})`);
+    lines.push(`### #${rank}: <${init.url}|${init.name}>`);
     lines.push(`- **Status**: ${init.status}`);
     if (init.owner) {
       lines.push(`- **Owner**: ${init.owner.name}`);

@@ -151,7 +151,7 @@ export async function postMessage(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel, text, thread_ts: threadTs }),
+        body: JSON.stringify({ channel, text, thread_ts: threadTs, unfurl_links: true }),
       },
       env.SLACK_BOT_TOKEN
     );

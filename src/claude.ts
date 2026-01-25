@@ -158,7 +158,7 @@ export async function generateResponse(
   }
 
   if (prioritiesContext) {
-    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\n${prioritiesContext}`;
+    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\nWhen mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.\n\n${prioritiesContext}`;
   }
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
@@ -315,7 +315,7 @@ export async function generateResponseStreaming(
 
   let systemPrompt = SYSTEM_PROMPT;
   if (prioritiesContext) {
-    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\n${prioritiesContext}`;
+    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\nWhen mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.\n\n${prioritiesContext}`;
   }
   if (initiativesContext) {
     systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;

@@ -194,6 +194,7 @@ describe("postMessage", () => {
           channel: "C123",
           text: "Hello world",
           thread_ts: "1234.0000",
+          unfurl_links: true,
         }),
       }
     );
@@ -373,6 +374,7 @@ describe("postDirectMessage", () => {
           channel: "D123",
           text: "Hello via DM!",
           thread_ts: undefined,
+          unfurl_links: true,
         }),
       })
     );
