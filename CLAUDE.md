@@ -115,3 +115,39 @@ Set via `npx wrangler secret put <NAME>`:
 - `SLACK_SIGNING_SECRET` - For request verification
 - `ANTHROPIC_API_KEY` - Claude API key
 - `DOCS_API_KEY` - API key for console-based document management (REST API)
+- `LINEAR_API_KEY` - Linear API key for R&D Priorities integration
+
+## R&D Priorities Integration
+
+Chorus fetches R&D Priorities from Linear and includes them in Claude's system prompt. This allows Chorus to answer questions like "What are our top priorities?" or "Who owns X?"
+
+**Key files:**
+- `src/linear-priorities.ts` - Fetches and formats priorities from Linear
+- Linear parent initiative ID is defined in `RD_PRIORITIES_INITIATIVE_ID` constant
+
+**Linear Structure:**
+- Parent Initiative linked to child initiatives via `initiativeRelations` with `sortOrder` for ranking
+- Each initiative has: owner, tech risk (🌶), theme, Slack channel in description
+
+**Debug/Test API Endpoints:**
+- `GET /api/debug/priorities` - Returns raw Linear priorities data (requires DOCS_API_KEY)
+- `POST /api/ask` - Ask Chorus a question directly via API (requires DOCS_API_KEY)
+
+Example:
+```bash
+curl -s "$CHORUS_URL/api/debug/priorities" \
+  -H "Authorization: Bearer $DOCS_API_KEY" | jq '.'
+
+curl -s "$CHORUS_URL/api/ask" \
+  -H "Authorization: Bearer $DOCS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are our top priorities?"}'
+```
+
+**Updating Priorities in Linear:**
+- Use `initiativeUpdate` mutation to change initiative details
+- Use `initiativeRelationUpdate` mutation to change sortOrder (ranking)
+- Use `initiativeRelationCreate/Delete` to add/remove from roadmap
+- Use `initiativeToProjectCreate/Delete` to link/unlink projects
+
+The priorities cache refreshes every 5 minutes.

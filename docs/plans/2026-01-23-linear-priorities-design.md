@@ -2,11 +2,11 @@
 
 ## Overview
 
-Migrate the R&D Priorities Google Sheet to Linear, enabling Chorus to answer priority questions with live data from where work actually happens.
+Migrate R&D Priorities from a spreadsheet to Linear, enabling Chorus to answer priority questions with live data from where work actually happens.
 
 ## Goals
 
-1. **Discoverability** - Chorus can answer "What's the status of X?", "What are our top priorities?", "Who owns RBAC?"
+1. **Discoverability** - Chorus can answer "What's the status of X?", "What are our top priorities?", "Who owns Y?"
 2. **Freshness** - Priority status stays current because it's sourced from Linear (not a stale spreadsheet)
 3. **No duplication** - Leverage existing Linear initiatives rather than creating parallel structures
 
@@ -19,15 +19,15 @@ Migrate the R&D Priorities Google Sheet to Linear, enabling Chorus to answer pri
 │  │   Initiatives    │────▶│           Projects               │  │
 │  │  (Strategic)     │     │         (Execution)              │  │
 │  │                  │     │                                  │  │
-│  │  - Metrics GA    │     │  - Metrics 2.0 GA Features       │  │
-│  │  - Canvas Q4     │     │  - Canvas Slackbot               │  │
-│  │  - RBAC          │     │  - Read-Only Role                │  │
+│  │  - Initiative A  │     │  - Project A1                    │  │
+│  │  - Initiative B  │     │  - Project A2                    │  │
+│  │  - Initiative C  │     │  - Project B1                    │  │
 │  │  - ...           │     │  - ...                           │  │
 │  └──────────────────┘     └──────────────────────────────────┘  │
 │           │                            │                         │
 │           │                            ▼                         │
 │           │               ┌──────────────────────────────────┐  │
-│           │               │   Roadmap: R&D Priorities 2026   │  │
+│           │               │   Parent Initiative (Roadmap)    │  │
 │           │               │   (Visual delivery tracking)     │  │
 │           │               └──────────────────────────────────┘  │
 └───────────┼──────────────────────────────────────────────────────┘
@@ -37,32 +37,21 @@ Migrate the R&D Priorities Google Sheet to Linear, enabling Chorus to answer pri
 │                         Chorus                                   │
 │                                                                  │
 │  Queries Initiatives API for:                                   │
-│  - Priority lookups ("What's the status of RBAC?")              │
+│  - Priority lookups ("What's the status of X?")                 │
 │  - List queries ("What's shipping Q4?")                         │
-│  - Owner lookups ("Who owns Canvas?")                           │
+│  - Owner lookups ("Who owns Y?")                                │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Data Model
 
-### Initiative Naming Convention
-
-```
-[#N] Title [risk]
-```
-
-Examples:
-- `[#1] Metrics GA [🌶🌶🌶]`
-- `[#2] Canvas Q4 Launch [🌶🌶🌶🌶]`
-- `[#3] Mature RBAC Offering [🌶🌶🌶🌶]`
-
 ### Initiative Fields
 
 | Field | Usage |
 |-------|-------|
-| `name` | `[#N] Title [risk]` |
-| `description` | Theme + detailed description + links |
+| `name` | Initiative title |
+| `description` | Theme + tech risk + Slack channel |
 | `owner` | "Who can I talk to about this?" |
 | `targetDate` | Target quarter end date |
 | `status` | Planned, Active, Completed |
@@ -71,120 +60,78 @@ Examples:
 ### Description Template
 
 ```markdown
-**Theme:** Works Where You Work
-
-**Next Milestone:** Support for ReInvent Demo and marketing
-
-**Links:**
-- Slack: #proj-metrics
-- Docs: https://honeycomb.quip.com/...
+---
+**R&D Priority Info**
+- Tech Risk: 🌶🌶🌶
+- Theme: Q1 - Theme Name
+- Slack: #proj-channel
 ```
 
-## Priority → Initiative Mapping
+## Implementation
 
-All priorities map to existing initiatives (no new initiatives needed):
+### Linear Structure
 
-| Stack Rank | Priority | Initiative | Owner |
-|------------|----------|------------|-------|
-| 1.1 | Metrics: Storage Engine | Metrics GA | Toni Chou |
-| 1.2 | Metrics: UI | Metrics GA | Toni Chou |
-| 2 | Data Visualizations | Explore - Q1'26 | TBD |
-| 3 | Boards Revamp | Explore - Q1'26 | TBD |
-| 4 | HTP – Enhance with Indexing | Cross-team: Enhance Indexing | Amy C. |
-| 7 | HTP – RaaS-Ready Pipeline Builder | OKR 1: Pipeline Builder | Jessica P. |
-| 8 | HTP – Bindplane | Pipeline Q1 2026 | TBD |
-| 9 | Honeycomb Canvas | Canvas Q4 Launch | Morgante Pell |
-| 10 | MCP | [mcp] q1 support | Austin Parker |
-| 11 | Single Tenant/Self-Hosted | Self-Hosted Honeycomb | Reid Savage |
-| 13 | RBAC | Mature RBAC Offering | Brooke Sargent |
-| 17 | Anomaly Detection | Unified alerting platform | Maggie La Belle |
-| 18 | Migration Tools for APM | App Enablement Full Stack | Grady Salzman |
-| 19 | Exec SLO Reporting | Unified alerting platform | Maggie La Belle |
-| 20 | SCIM | Mature RBAC Offering | Brooke Sargent |
-| 22 | Timeline Analysis | App Enablement Full Stack | Grady Salzman |
-| - | Metrics Triggers | Metrics GA | Toni Chou |
-| - | Honeycomb for Onboarding | Onboarding | Mei Luo |
-| - | Expand Logging Workflows | Explore - Q1'26 | TBD |
-| - | Resource-Efficient Refinery | OKR 2: Strengthen OTel and Refinery | Amy C. |
-| - | HTP – Pipeline Builder GA | OKR 1: Pipeline Builder | Jessica P. |
-| - | OTel Python DX | OKR 2: Strengthen OTel and Refinery | Amy C. |
-| - | E&S Migration Tooling | App Enablement Full Stack | Grady Salzman |
-| - | More Refinery perf (3.1) | OKR 2: Strengthen OTel and Refinery | Amy C. |
+- **Parent Initiative** acts as the roadmap container
+- Child initiatives linked via `initiativeRelations` with `sortOrder` for ranking
+- Each child initiative can have multiple projects linked
+- Linear deprecated Roadmaps in favor of Initiatives, so we use initiative relations
 
-### Deprioritized (Not Migrating)
+### Chorus Integration
 
-- HFO Mobile Error Symbolication
-- HFO Error Support
-- ReactNative SDK
-- Tags
-- Spaces
-- AI-assisted Instrumentation
-- Public APIs
+1. `src/linear-priorities.ts` - Fetches priorities via Linear GraphQL API
+2. Filters by parent initiative ID (`RD_PRIORITIES_INITIATIVE_ID`)
+3. Sorts by `sortOrder` to maintain ranking
+4. Formats as context for Claude's system prompt
+5. Caches for 5 minutes to reduce API calls
 
-## Implementation Plan
+### API Endpoints
 
-### Phase 1: Enhance Existing Initiatives
+- `GET /api/debug/priorities` - Returns raw Linear priorities data
+- `POST /api/ask` - Ask Chorus a question directly via API
 
-For each of the 12 initiatives in the mapping:
+### Key Linear Mutations
 
-1. Update `name` to include stack rank and tech risk: `[#N] Title [🌶...]`
-2. Update `description` with theme, next milestone, and links
-3. Verify `owner` matches the sheet's "Who can I talk to"
-4. Set `targetDate` to match target quarter
-5. Verify projects are linked
+```graphql
+# Update initiative details
+initiativeUpdate(id: ID, input: { name, description, ownerId, status })
 
-### Phase 2: Create Parent Initiative
+# Change ranking
+initiativeRelationUpdate(id: ID, input: { sortOrder })
 
-Note: Linear deprecated Roadmaps in favor of Initiatives, so we use initiative relations instead.
+# Add/remove from roadmap
+initiativeRelationCreate(input: { initiativeId, relatedInitiativeId, sortOrder })
+initiativeRelationDelete(id: ID)
 
-1. Created parent initiative: "R&D Priorities 2026"
-2. Linked all 13 priority initiatives via `initiativeRelationCreate` with `sortOrder`
-3. URL: https://linear.app/honeycombio/initiative/randd-priorities-2026-a50c79278bc2
-
-### Phase 3: Wire Up Chorus
-
-1. Add Linear Initiatives query capability to Chorus
-2. Implement query patterns:
-   - `getInitiativeByName(name)` - fuzzy match on initiative name
-   - `getTopInitiatives(n)` - return top N by sortOrder
-   - `getInitiativesByTargetDate(quarter)` - filter by target quarter
-   - `getInitiativeOwner(name)` - return owner for an initiative
-
-### Phase 4: Deprecate Google Sheet
-
-1. Add note to sheet pointing to Linear as source of truth
-2. Archive sheet after 30 days of successful Linear usage
+# Link/unlink projects
+initiativeToProjectCreate(input: { initiativeId, projectId })
+initiativeToProjectDelete(id: ID)
+```
 
 ## Chorus Query Examples
 
-After implementation, Chorus should handle:
+After implementation, Chorus handles:
 
 ```
 "What's priority #1?"
-→ Metrics GA - Storage engine revamp and UI features for metrics analysis
+→ [Returns top ranked initiative with details]
 
-"What's the status of Canvas?"
-→ Canvas Q4 Launch is Active, owned by Morgante Pell, targeting Q4 2025
+"What's the status of X?"
+→ [Returns initiative status, owner, and progress]
 
-"What's shipping in Q1 2026?"
-→ [Lists initiatives with Q1 2026 target dates]
+"What's shipping in Q1?"
+→ [Lists initiatives with Q1 target dates]
 
-"Who owns RBAC?"
-→ Brooke Sargent owns Mature RBAC Offering
+"Who owns Y?"
+→ [Returns initiative owner]
 
 "What are the top 5 priorities?"
 → [Ordered list of top 5 initiatives by stack rank]
 ```
 
-## Open Questions
-
-1. Should stack rank be in initiative name or stored elsewhere?
-2. How to handle priorities that span multiple initiatives (e.g., Metrics 1.1 and 1.2)?
-3. Cadence for updating stack ranks when priorities change?
-
 ## Success Criteria
 
-- [x] All 13 initiatives updated with theme and tech risk metadata
-- [x] Parent initiative "R&D Priorities 2026" created with relations to all 13
-- [x] Chorus can answer basic priority queries (via linear-priorities.ts)
-- [ ] Google Sheet marked as deprecated
+- [x] Initiatives updated with theme, tech risk, and Slack channel
+- [x] Parent initiative created with relations to all priorities
+- [x] Chorus can answer basic priority queries
+- [x] Debug API endpoints created
+- [x] Projects linked to initiatives where applicable
