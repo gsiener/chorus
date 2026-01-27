@@ -17,8 +17,8 @@
     "test:quality": "vitest run --config vitest.quality.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.5",
-    "@cloudflare/workers-types": "^4.20260120.0",
+    "@cloudflare/vitest-pool-workers": "^0.12.6",
+    "@cloudflare/workers-types": "^4.20260124.0",
     "@types/node": "^22.15.0",
     "typescript": "^5.7.2",
     "vitest": "3.2.x",
