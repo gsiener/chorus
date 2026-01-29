@@ -30,6 +30,7 @@ import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects } from "./linear";
 import { sendWeeklyCheckins } from "./checkins";
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
+import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
@@ -961,6 +962,19 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
         response = result.message;
       }
 
+      await postMessage(channel, response, threadTs, env);
+      return;
+    }
+
+    // Check for check-briefs command
+    if (/^check[- ]?briefs$/i.test(cleanedText)) {
+      recordCommand("check-briefs");
+
+      // Post acknowledgment
+      await postMessage(channel, "Checking initiatives for missing briefs...", threadTs, env);
+
+      const result = await checkInitiativeBriefs(env);
+      const response = formatBriefCheckResults(result);
       await postMessage(channel, response, threadTs, env);
       return;
     }
