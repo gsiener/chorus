@@ -26,7 +26,7 @@ We use **Linear** to track tasks:
 - Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
 
 **Linear API access:**
-- API key is in `.env` as `LINEAR_API_KEY` (use `source .env` first)
+- API key is in `.env` as `LINEAR_API` (use `source .env` first)
 - Use the GraphQL API at `https://api.linear.app/graphql`
 - Team ID for PDD Leadership: `daa91240-92e1-4a78-8cc7-a53684a431b1`
 
@@ -41,7 +41,7 @@ Example to create an issue:
 ```bash
 source .env && curl -s -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
-  -H "Authorization: $LINEAR_API_KEY" \
+  -H "Authorization: $LINEAR_API" \
   -d '{
     "query": "mutation CreateIssue($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { identifier url } } }",
     "variables": {
@@ -59,7 +59,7 @@ Example to update issue state (use issue UUID, not identifier):
 ```bash
 source .env && curl -s -X POST https://api.linear.app/graphql \
   -H "Content-Type: application/json" \
-  -H "Authorization: $LINEAR_API_KEY" \
+  -H "Authorization: $LINEAR_API" \
   -d '{
     "query": "mutation { issueUpdate(id: \"ISSUE_UUID\", input: { stateId: \"STATE_ID\" }) { success } }"
   }'
@@ -115,7 +115,7 @@ Set via `npx wrangler secret put <NAME>`:
 - `SLACK_SIGNING_SECRET` - For request verification
 - `ANTHROPIC_API_KEY` - Claude API key
 - `DOCS_API_KEY` - API key for console-based document management (REST API)
-- `LINEAR_API_KEY` - Linear API key for R&D Priorities integration
+- `LINEAR_API` - Linear API key for R&D Priorities integration
 
 ## R&D Priorities Integration
 
