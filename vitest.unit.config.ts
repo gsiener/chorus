@@ -47,6 +47,7 @@ export default defineConfig({
       "src/__tests__/initiative-nlp.test.ts",
       "src/__tests__/http-utils.test.ts",
       "src/__tests__/linear.test.ts",
+      "src/__tests__/user-mapping.test.ts",
     ],
 
     // Exclude integration tests (those need workers pool)
