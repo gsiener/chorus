@@ -554,11 +554,24 @@ async function handleSlashCommand(request: Request, env: Env): Promise<Response>
 // Export handler for testing
 export const handler = {
   /**
-   * Handle scheduled cron triggers (weekly check-ins)
+   * Handle scheduled cron triggers (weekly check-ins and brief checker)
    */
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log("Running scheduled check-ins at", new Date(controller.scheduledTime).toISOString());
+    console.log("Running scheduled tasks at", new Date(controller.scheduledTime).toISOString());
+
+    // Run weekly check-ins
     ctx.waitUntil(sendWeeklyCheckins(env));
+
+    // Run brief checker
+    ctx.waitUntil(
+      checkInitiativeBriefs(env).then((result) => {
+        console.log(
+          `Brief check complete: ${result.initiativesChecked} checked, ` +
+            `${result.missingBriefs.filter((m) => m.dmSent).length} DMs sent, ` +
+            `${result.unmappedUsers.length} unmapped users`
+        );
+      })
+    );
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
