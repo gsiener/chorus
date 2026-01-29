@@ -48,6 +48,7 @@ export default defineConfig({
       "src/__tests__/http-utils.test.ts",
       "src/__tests__/linear.test.ts",
       "src/__tests__/user-mapping.test.ts",
+      "src/__tests__/brief-checker.test.ts",
     ],
 
     // Exclude integration tests (those need workers pool)
