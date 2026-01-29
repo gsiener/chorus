@@ -160,6 +160,9 @@ Just ask me anything about your product strategy, roadmap, or initiatives in nat
 • Upload files (text, markdown, JSON, CSV) to add them as docs
 • \`@Chorus backfill docs\` — reindex for semantic search
 
+*Admin Commands:*
+• \`@Chorus check-briefs\` — check initiatives for missing briefs, DM owners
+
 *Pro Tips:*
 • I remember context within threads — just keep chatting!
 • I'll nudge you about missing PRDs or metrics when relevant
