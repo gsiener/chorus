@@ -81,6 +81,67 @@ This ensures we:
 - Have verification that the fix works
 - Prevent future regressions with the new test coverage
 
+## Workflow Principles
+
+### 1. Plan Mode Default
+
+Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions):
+
+- Create a Linear issue with detailed description including checkable markdown list
+- If something goes sideways, STOP and re-plan immediately - don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs in the Linear issue upfront to reduce ambiguity
+
+Example Linear issue structure:
+```markdown
+## Plan
+- [ ] Step 1: Research X
+- [ ] Step 2: Implement Y
+- [ ] Step 3: Test Z
+
+## Verification
+- [ ] Tests pass
+- [ ] Behavior diff looks correct
+- [ ] Would a staff engineer approve?
+```
+
+### 2. Subagent Strategy
+
+Use subagents liberally to keep main context window clean:
+
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One focused task per subagent for better execution
+- This prevents context pollution and improves performance
+
+### 3. Verification Before Done
+
+Never move a Linear issue to "Done" without proving it works:
+
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+- If you can't verify, leave in "In Review" for manual verification
+
+### 4. Demand Elegance (Balanced)
+
+For non-trivial changes: pause and ask "is there a more elegant way?"
+
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes - don't over-engineer
+- Challenge your own work before presenting it
+- Balance elegance with practicality
+
+### 5. Self-Improvement Loop
+
+After ANY correction from the user, capture the lesson:
+
+- Create a new document in `docs/solutions/` with the pattern
+- Use YAML frontmatter (module, tags, symptoms, root_cause, resolution_type)
+- Write rules for yourself that prevent the same mistake
+- Build institutional knowledge over time
+- Review existing solutions at session start for relevant patterns
+
 ## Project Overview
 
 Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using Claude for AI-powered responses. It maintains thread context for natural conversations and is focused on internal knowledge about product roadmap and strategy.
