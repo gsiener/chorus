@@ -4,6 +4,7 @@
  * Syncs Linear projects as initiatives for tracking and context.
  */
 
+import { INITIATIVES_KV } from "./kv";
 import type { Env, Initiative, InitiativeStatusValue } from "./types";
 
 // Linear GraphQL endpoint
@@ -11,8 +12,6 @@ const LINEAR_API_URL = "https://api.linear.app/graphql";
 
 // KV key prefixes
 const LINEAR_MAP_PREFIX = "linear-map:";
-const INITIATIVES_INDEX_KEY = "initiatives:index";
-const INITIATIVES_PREFIX = "initiatives:detail:";
 
 interface LinearProject {
   id: string;
@@ -57,18 +56,7 @@ function mapLinearStateToStatus(state: string): InitiativeStatusValue {
   }
 }
 
-/**
- * Generate a URL-safe ID from a name
- */
-function nameToId(name: string): string {
-  return name
-    .slice(0, 100)
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
-}
+import { nameToId } from "./utils";
 
 /**
  * Fetch projects from Linear API
@@ -117,6 +105,91 @@ export async function fetchLinearProjects(env: Env): Promise<LinearProject[]> {
   return data.data?.projects.nodes || [];
 }
 
+async function updateExistingInitiative(
+  env: Env,
+  project: LinearProject,
+  existingInitiativeId: string
+): Promise<boolean> {
+  const initData = await env.DOCS_KV.get(`${INITIATIVES_KV.prefix}${existingInitiativeId}`);
+  if (!initData) {
+    return false;
+  }
+
+  const initiative = JSON.parse(initData) as Initiative;
+  const newStatus = mapLinearStateToStatus(project.state);
+
+  if (initiative.status.value !== newStatus) {
+    initiative.status = {
+      value: newStatus,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "linear-sync",
+    };
+    initiative.updatedAt = new Date().toISOString();
+    await env.DOCS_KV.put(`${INITIATIVES_KV.prefix}${existingInitiativeId}`, JSON.stringify(initiative));
+    return true;
+  }
+  return false;
+}
+
+async function createAndStoreNewInitiative(
+  env: Env,
+  project: LinearProject,
+  syncedBy: string,
+  index: any // InitiativeIndex type causes circular dependency, using any for now
+): Promise<{ created: boolean; initiativeId?: string }> {
+  const now = new Date().toISOString();
+  const id = nameToId(project.name);
+
+  // Check if an initiative with this name already exists in our index
+  const existingByName = index.initiatives.find(
+    (i: { name: string }) => i.name.toLowerCase() === project.name.toLowerCase()
+  );
+
+  if (existingByName) {
+    // Link existing initiative to Linear project
+    await env.DOCS_KV.put(`${LINEAR_MAP_PREFIX}${project.id}`, existingByName.id);
+    return { created: false, initiativeId: existingByName.id };
+  }
+
+  const initiative: Initiative = {
+    id,
+    name: project.name,
+    description: project.description || "Synced from Linear",
+    owner: syncedBy, // Default to whoever triggered the sync
+    status: {
+      value: mapLinearStateToStatus(project.state),
+      updatedAt: now,
+      updatedBy: "linear-sync",
+    },
+    expectedMetrics: [],
+    linearProjectId: project.id,
+    createdAt: now,
+    createdBy: "linear-sync",
+    updatedAt: now,
+  };
+
+  // Store initiative
+  await env.DOCS_KV.put(`${INITIATIVES_KV.prefix}${id}`, JSON.stringify(initiative));
+
+  // Update index
+  index.initiatives.push({
+    id,
+    name: project.name,
+    owner: syncedBy,
+    status: initiative.status.value,
+    hasMetrics: false,
+    hasPrd: false,
+    updatedAt: now,
+  });
+  index.lastSyncedWithLinear = now; // This will be updated again at the end, but good to keep consistent
+  await env.DOCS_KV.put(INITIATIVES_KV.index, JSON.stringify(index));
+
+  // Store mapping
+  await env.DOCS_KV.put(`${LINEAR_MAP_PREFIX}${project.id}`, id);
+
+  return { created: true, initiativeId: id };
+}
+
 /**
  * Sync Linear projects as initiatives
  * Creates new initiatives for projects not yet tracked,
@@ -132,95 +205,48 @@ export async function syncLinearProjects(
     let created = 0;
     let updated = 0;
 
+    // Fetch the index once
+    const indexData = await env.DOCS_KV.get(INITIATIVES_KV.index);
+    const index = indexData ? JSON.parse(indexData) : { initiatives: [] };
+
     for (const project of projects) {
       // Check if we already have a mapping for this Linear project
       const existingInitiativeId = await env.DOCS_KV.get(`${LINEAR_MAP_PREFIX}${project.id}`);
 
       if (existingInitiativeId) {
-        // Update existing initiative
-        const initData = await env.DOCS_KV.get(`${INITIATIVES_PREFIX}${existingInitiativeId}`);
-        if (initData) {
-          const initiative = JSON.parse(initData) as Initiative;
-          const newStatus = mapLinearStateToStatus(project.state);
-
-          // Update if status changed
-          if (initiative.status.value !== newStatus) {
-            initiative.status = {
-              value: newStatus,
-              updatedAt: new Date().toISOString(),
-              updatedBy: "linear-sync",
-            };
-            initiative.updatedAt = new Date().toISOString();
-            await env.DOCS_KV.put(`${INITIATIVES_PREFIX}${existingInitiativeId}`, JSON.stringify(initiative));
-            updated++;
-          }
+        if (await updateExistingInitiative(env, project, existingInitiativeId)) {
+          updated++;
         }
       } else {
-        // Create new initiative from Linear project
-        const now = new Date().toISOString();
-        const id = nameToId(project.name);
-
-        // Check if an initiative with this name already exists
-        const indexData = await env.DOCS_KV.get(INITIATIVES_INDEX_KEY);
-        const index = indexData ? JSON.parse(indexData) : { initiatives: [] };
-
-        const existingByName = index.initiatives.find(
-          (i: { name: string }) => i.name.toLowerCase() === project.name.toLowerCase()
-        );
-
-        if (existingByName) {
-          // Link existing initiative to Linear project
-          await env.DOCS_KV.put(`${LINEAR_MAP_PREFIX}${project.id}`, existingByName.id);
-          continue;
+        const { created: newCreated } = await createAndStoreNewInitiative(env, project, syncedBy, index);
+        if (newCreated) {
+          created++;
         }
-
-        const initiative: Initiative = {
-          id,
-          name: project.name,
-          description: project.description || "Synced from Linear",
-          owner: syncedBy, // Default to whoever triggered the sync
-          status: {
-            value: mapLinearStateToStatus(project.state),
-            updatedAt: now,
-            updatedBy: "linear-sync",
-          },
-          expectedMetrics: [],
-          linearProjectId: project.id,
-          createdAt: now,
-          createdBy: "linear-sync",
-          updatedAt: now,
-        };
-
-        // Store initiative
-        await env.DOCS_KV.put(`${INITIATIVES_PREFIX}${id}`, JSON.stringify(initiative));
-
-        // Update index
-        index.initiatives.push({
-          id,
-          name: project.name,
-          owner: syncedBy,
-          status: initiative.status.value,
-          hasMetrics: false,
-          hasPrd: false,
-          updatedAt: now,
-        });
-        index.lastSyncedWithLinear = now;
-        await env.DOCS_KV.put(INITIATIVES_INDEX_KEY, JSON.stringify(index));
-
-        // Store mapping
-        await env.DOCS_KV.put(`${LINEAR_MAP_PREFIX}${project.id}`, id);
-
-        created++;
       }
     }
 
-    // Update last sync timestamp
-    const indexData = await env.DOCS_KV.get(INITIATIVES_INDEX_KEY);
-    if (indexData) {
-      const index = JSON.parse(indexData);
-      index.lastSyncedWithLinear = new Date().toISOString();
-      await env.DOCS_KV.put(INITIATIVES_INDEX_KEY, JSON.stringify(index));
-    }
+    // Update last sync timestamp (after all projects are processed)
+    index.lastSyncedWithLinear = new Date().toISOString();
+    await env.DOCS_KV.put(INITIATIVES_KV.index, JSON.stringify(index));
+
+    return {
+      success: true,
+      message: `Synced ${projects.length} Linear projects: ${created} created, ${updated} updated.`,
+      synced: projects.length,
+      created,
+      updated,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `Failed to sync Linear projects: ${errorMessage}`,
+      synced: 0,
+      created: 0,
+      updated: 0,
+    };
+  }
+}
 
     return {
       success: true,

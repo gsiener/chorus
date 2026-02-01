@@ -128,8 +128,9 @@ export async function fetchThreadMessages(
       env.SLACK_BOT_TOKEN
     );
     return (data.messages ?? []).sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
-  } catch {
-    return [];
+  } catch (error) {
+    console.error(`Failed to fetch thread messages for ${channel}/${threadTs}:`, error);
+    throw error; // Re-throw the error for the caller to handle
   }
 }
 
@@ -156,8 +157,9 @@ export async function postMessage(
       env.SLACK_BOT_TOKEN
     );
     return data.ts ?? null;
-  } catch {
-    return null;
+  } catch (error) {
+    console.error(`Failed to post message to ${channel}:`, error);
+    throw error; // Re-throw the error for the caller to handle
   }
 }
 
@@ -180,8 +182,9 @@ export async function updateMessage(
       env.SLACK_BOT_TOKEN
     );
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    console.error(`Failed to update message ${ts} in ${channel}:`, error);
+    throw error; // Re-throw the error for the caller to handle
   }
 }
 
@@ -196,24 +199,22 @@ export async function addReaction(
   env: Env
 ): Promise<boolean> {
   try {
-    const response = await fetch("https://slack.com/api/reactions.add", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-        "Content-Type": "application/json",
+    await slackFetch<ReactionResponse>(
+      "https://slack.com/api/reactions.add",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, timestamp: ts, name: emoji }),
       },
-      body: JSON.stringify({ channel, timestamp: ts, name: emoji }),
-    });
-
-    const data = (await response.json()) as ReactionResponse;
-
-    // already_reacted is not an error
-    if (!data.ok && data.error !== "already_reacted") {
-      return false;
-    }
-
+      env.SLACK_BOT_TOKEN
+    );
     return true;
-  } catch {
+  } catch (error) {
+    if (error instanceof SlackApiError && error.code === "already_reacted") {
+      // already_reacted is not an error we care about
+      return true;
+    }
+    console.error(`Failed to add reaction to ${channel}/${ts}: ${error}`);
     return false;
   }
 }
@@ -246,15 +247,11 @@ export async function postDirectMessage(
     }
 
     const ts = await postMessage(openData.channel.id, text, undefined, env);
-    if (!ts) {
-      console.error(`postMessage failed for user ${userId}`);
-      return { ts: null, error: "message_post_failed" };
-    }
     return { ts };
   } catch (error) {
     const errorMessage =
       error instanceof SlackApiError
-        ? error.code
+        ? error.message // SlackApiError already includes code in message
         : error instanceof Error
           ? error.message
           : String(error);
