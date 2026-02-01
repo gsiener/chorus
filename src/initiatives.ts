@@ -5,6 +5,7 @@
  * Initiatives track product work with owners, metrics, PRDs, and status.
  */
 
+import { INITIATIVES_KV } from "./kv";
 import type {
   Env,
   Initiative,
@@ -15,39 +16,25 @@ import type {
   ExpectedMetric,
 } from "./types";
 
-const INITIATIVES_INDEX_KEY = "initiatives:index";
-const INITIATIVES_PREFIX = "initiatives:detail:";
-
 // Limits
 const MAX_NAME_LENGTH = 100;
 const MAX_DESCRIPTION_LENGTH = 5000;
 const MAX_INITIATIVES = 100;
 
-/**
- * Generate a URL-safe ID from a name
- */
-function nameToId(name: string): string {
-  return name
-    .slice(0, MAX_NAME_LENGTH)
-    .replace(/[^\w\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
-}
+import { nameToId } from "./utils";
 
 /**
  * Generate a KV key from an initiative ID
  */
 function idToKey(id: string): string {
-  return INITIATIVES_PREFIX + id;
+  return INITIATIVES_KV.prefix + id;
 }
 
 /**
  * Get the initiatives index from KV
  */
 async function getIndex(env: Env): Promise<InitiativeIndex> {
-  const data = await env.DOCS_KV.get(INITIATIVES_INDEX_KEY);
+  const data = await env.DOCS_KV.get(INITIATIVES_KV.index);
   if (!data) {
     return { initiatives: [] };
   }
@@ -58,7 +45,7 @@ async function getIndex(env: Env): Promise<InitiativeIndex> {
  * Save the initiatives index to KV
  */
 async function saveIndex(env: Env, index: InitiativeIndex): Promise<void> {
-  await env.DOCS_KV.put(INITIATIVES_INDEX_KEY, JSON.stringify(index));
+  await env.DOCS_KV.put(INITIATIVES_KV.index, JSON.stringify(index));
 }
 
 /**

@@ -9,10 +9,9 @@
 
 import type { Env, InitiativeMetadata, Initiative } from "./types";
 import { postDirectMessage } from "./slack";
+import { INITIATIVES_KV } from "./kv";
 
 // KV keys
-const INITIATIVES_INDEX_KEY = "initiatives:index";
-const INITIATIVES_PREFIX = "initiatives:detail:";
 const LAST_CHECKIN_PREFIX = "checkin:last:";
 
 // Rate limiting intervals
@@ -31,7 +30,7 @@ interface InitiativeWithDetails extends InitiativeMetadata {
 async function getInitiativesByOwner(
   env: Env
 ): Promise<Map<string, InitiativeWithDetails[]>> {
-  const indexData = await env.DOCS_KV.get(INITIATIVES_INDEX_KEY);
+  const indexData = await env.DOCS_KV.get(INITIATIVES_KV.index);
   if (!indexData) {
     return new Map();
   }
@@ -49,7 +48,7 @@ async function getInitiativesByOwner(
 
   // Batch load all initiative details in parallel (fixes N+1 query issue)
   const detailPromises = activeInitiatives.map(async (meta) => {
-    const detailData = await env.DOCS_KV.get(`${INITIATIVES_PREFIX}${meta.id}`);
+    const detailData = await env.DOCS_KV.get(`${INITIATIVES_KV.prefix}${meta.id}`);
     const details = detailData ? (JSON.parse(detailData) as Initiative) : null;
     return { meta, details };
   });
@@ -163,6 +162,61 @@ function formatCheckinMessage(initiatives: InitiativeWithDetails[]): string {
   return lines.join("\n");
 }
 
+async function sendTestCheckin(env: Env, testUser: string): Promise<{ success: boolean; message: string; sentTo: number }> {
+  console.log(`Test user ${testUser} has no initiatives, sending test message`);
+  const testMessage =
+    "👋 *Weekly Initiative Check-in (Test)*\n\n" +
+    "_This is a test message. You don't currently own any initiatives._\n\n" +
+    "Use `@Chorus add initiative \"Name\" owned by @you` to create one.";
+
+  if (await shouldSendCheckin(testUser, env)) {
+    const result = await postDirectMessage(testUser, testMessage, env);
+    if (result.ts) {
+      await recordCheckin(testUser, env);
+      return {
+        success: true,
+        message: "Sent test check-in (no initiatives).",
+        sentTo: 1,
+      };
+    } else {
+      console.error(`Failed to send test check-in to ${testUser}: ${result.error}`);
+      return {
+        success: false,
+        message: `Failed to send test check-in DM: ${result.error}`,
+        sentTo: 0,
+      };
+    }
+  } else {
+    console.log(`Skipping test check-in for ${testUser} (recently sent)`);
+    return {
+      success: true,
+      message: "Skipped test check-in (recently sent).",
+      sentTo: 0,
+    };
+  }
+}
+
+async function processOwnerCheckin(env: Env, ownerId: string, initiatives: InitiativeWithDetails[]): Promise<boolean> {
+  // Skip if we recently sent a check-in
+  if (!(await shouldSendCheckin(ownerId, env))) {
+    console.log(`Skipping check-in for ${ownerId} (recently sent)`);
+    return false;
+  }
+
+  // Format and send the message
+  const message = formatCheckinMessage(initiatives);
+  const result = await postDirectMessage(ownerId, message, env);
+
+  if (result.ts) {
+    await recordCheckin(ownerId, env);
+    console.log(`Sent check-in to ${ownerId}`);
+    return true;
+  } else {
+    console.error(`Failed to send check-in to ${ownerId}: ${result.error}`);
+    return false;
+  }
+}
+
 /**
  * Send check-in DMs to initiative owners
  * When TEST_CHECKIN_USER is set, only sends to that user (for testing)
@@ -181,37 +235,7 @@ export async function sendWeeklyCheckins(
 
       // If test user doesn't own any initiatives, send them a test message anyway
       if (!byOwner.has(testUser)) {
-        console.log(`Test user ${testUser} has no initiatives, sending test message`);
-        const testMessage =
-          "👋 *Weekly Initiative Check-in (Test)*\n\n" +
-          "_This is a test message. You don't currently own any initiatives._\n\n" +
-          "Use `@Chorus add initiative \"Name\" owned by @you` to create one.";
-
-        if (await shouldSendCheckin(testUser, env)) {
-          const result = await postDirectMessage(testUser, testMessage, env);
-          if (result.ts) {
-            await recordCheckin(testUser, env);
-            return {
-              success: true,
-              message: "Sent test check-in (no initiatives).",
-              sentTo: 1,
-            };
-          } else {
-            console.error(`Failed to send test check-in to ${testUser}: ${result.error}`);
-            return {
-              success: false,
-              message: `Failed to send test check-in DM: ${result.error}`,
-              sentTo: 0,
-            };
-          }
-        } else {
-          console.log(`Skipping test check-in for ${testUser} (recently sent)`);
-          return {
-            success: true,
-            message: "Skipped test check-in (recently sent).",
-            sentTo: 0,
-          };
-        }
+        return await sendTestCheckin(env, testUser);
       }
     }
 
@@ -221,22 +245,8 @@ export async function sendWeeklyCheckins(
         continue;
       }
 
-      // Skip if we recently sent a check-in
-      if (!(await shouldSendCheckin(ownerId, env))) {
-        console.log(`Skipping check-in for ${ownerId} (recently sent)`);
-        continue;
-      }
-
-      // Format and send the message
-      const message = formatCheckinMessage(initiatives);
-      const result = await postDirectMessage(ownerId, message, env);
-
-      if (result.ts) {
-        await recordCheckin(ownerId, env);
+      if (await processOwnerCheckin(env, ownerId, initiatives)) {
         sentCount++;
-        console.log(`Sent check-in to ${ownerId}`);
-      } else {
-        console.error(`Failed to send check-in to ${ownerId}: ${result.error}`);
       }
     }
 
