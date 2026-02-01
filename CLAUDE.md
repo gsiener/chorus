@@ -65,6 +65,22 @@ source .env && curl -s -X POST https://api.linear.app/graphql \
   }'
 ```
 
+## Bug Reporting Workflow
+
+When a bug is reported, follow this workflow:
+
+1. **Create a Linear issue** - Capture the bug in Linear (associated with the Chorus project)
+2. **Write a failing test** - Create a test that reproduces the bug and fails
+3. **Use subagents to fix** - Launch specialized agents to fix the bug
+4. **Verify with passing test** - Confirm the fix works by showing the test now passes
+5. **Update Linear issue** - Move through workflow states (In Progress → In Review → Done)
+
+This ensures we:
+- Have a clear record of the bug
+- Actually reproduce the issue before attempting fixes
+- Have verification that the fix works
+- Prevent future regressions with the new test coverage
+
 ## Project Overview
 
 Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using Claude for AI-powered responses. It maintains thread context for natural conversations and is focused on internal knowledge about product roadmap and strategy.
