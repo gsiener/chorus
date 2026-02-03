@@ -341,6 +341,90 @@ describe("Docs API", () => {
   });
 });
 
+describe("Streaming API", () => {
+  const mockKvStore: Record<string, string> = {};
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-signing-secret",
+    ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_API_KEY: "test-api-key",
+    DOCS_KV: {
+      get: vi.fn((key: string) => Promise.resolve(mockKvStore[key] || null)),
+      put: vi.fn((key: string, value: string) => {
+        mockKvStore[key] = value;
+        return Promise.resolve();
+      }),
+    } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("GET /api/stream returns 401 without auth", async () => {
+    const request = new Request("https://example.com/api/stream?question=test");
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("GET /api/stream returns 400 without question parameter", async () => {
+    const request = new Request("https://example.com/api/stream", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { error: string };
+    expect(body.error).toContain("question");
+  });
+
+  it("GET /api/stream returns SSE content type", async () => {
+    // Mock Claude API response
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        content: [{ type: "text", text: "Test response" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }), { status: 200 })
+    );
+
+    const request = new Request("https://example.com/api/stream?question=test", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+  });
+
+  it("GET /api/stream returns 405 for POST method", async () => {
+    const request = new Request("https://example.com/api/stream?question=test", {
+      method: "POST",
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(405);
+  });
+});
+
 describe("Search Command", () => {
   const mockEnv: Env = {
     SLACK_BOT_TOKEN: "xoxb-test-token",

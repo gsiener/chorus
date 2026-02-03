@@ -3,6 +3,7 @@
  */
 
 import type { Env, SlackMessage } from "./types";
+import { USER_INFO_CACHE_TTL_SECONDS } from "./constants";
 
 // Error classes
 
@@ -261,5 +262,88 @@ export async function postDirectMessage(
           : String(error);
     console.error(`Failed to send DM to ${userId}: ${errorMessage}`);
     return { ts: null, error: errorMessage };
+  }
+}
+
+/**
+ * User info returned from Slack API
+ */
+export interface UserInfo {
+  id: string;
+  name: string;
+  realName: string | null;
+  title: string | null;
+  email: string | null;
+}
+
+// KV key prefix for user info cache
+const USER_INFO_CACHE_PREFIX = "user:info:";
+
+interface SlackUserResponse {
+  ok: boolean;
+  user?: {
+    id: string;
+    name: string;
+    real_name?: string;
+    profile?: {
+      title?: string;
+      email?: string;
+      real_name?: string;
+    };
+  };
+  error?: string;
+}
+
+/**
+ * Fetch user info from Slack API with KV caching
+ */
+export async function fetchUserInfo(
+  userId: string,
+  env: Env
+): Promise<UserInfo | null> {
+  const cacheKey = `${USER_INFO_CACHE_PREFIX}${userId}`;
+
+  // Check cache first
+  const cached = await env.DOCS_KV.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached) as UserInfo;
+  }
+
+  try {
+    const url = `https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`;
+    const data = await slackFetch<SlackUserResponse>(
+      url,
+      { method: "GET" },
+      env.SLACK_BOT_TOKEN
+    );
+
+    if (!data.user) {
+      console.error(`users.info returned no user for ${userId}`);
+      return null;
+    }
+
+    const userInfo: UserInfo = {
+      id: data.user.id,
+      name: data.user.name,
+      realName: data.user.real_name || data.user.profile?.real_name || null,
+      title: data.user.profile?.title || null,
+      email: data.user.profile?.email || null,
+    };
+
+    // Cache the result
+    await env.DOCS_KV.put(cacheKey, JSON.stringify(userInfo), {
+      expirationTtl: USER_INFO_CACHE_TTL_SECONDS,
+    });
+
+    return userInfo;
+  } catch (error) {
+    const errorMessage =
+      error instanceof SlackApiError
+        ? error.code
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    console.error(`Failed to fetch user info for ${userId}: ${errorMessage}`);
+    return null;
   }
 }

@@ -20,6 +20,7 @@ export const VALID_STATUSES: InitiativeStatusValue[] = [
 
 export type DocCommand =
   | { type: "add"; title: string; content: string }
+  | { type: "update"; title: string; content: string }
   | { type: "remove"; title: string }
   | { type: "list"; page?: number }
   | { type: "backfill" };
@@ -76,6 +77,12 @@ export function parseDocCommand(text: string, botUserId: string): DocCommand | n
   const addMatch = cleaned.match(/^add\s+doc\s+"([^"]+)":\s*(.+)$/is);
   if (addMatch) {
     return { type: "add", title: addMatch[1], content: addMatch[2].trim() };
+  }
+
+  // Update doc: update doc "Title": content
+  const updateMatch = cleaned.match(/^update\s+doc\s+"([^"]+)":\s*(.+)$/is);
+  if (updateMatch) {
+    return { type: "update", title: updateMatch[1], content: updateMatch[2].trim() };
   }
 
   // Remove doc: remove doc "Title"
@@ -262,6 +269,30 @@ export function parseSearchCommand(text: string, botUserId: string): SearchComma
   const unquotedMatch = cleaned.match(/^search\s+(.+)$/i);
   if (unquotedMatch) {
     return { query: unquotedMatch[1].trim() };
+  }
+
+  return null;
+}
+
+// Check-in command types
+export type CheckInCommand = { type: "history"; limit?: number };
+
+/**
+ * Parse check-in commands from message text
+ *
+ * Supported commands:
+ * - "checkin history" or "check-in history" [--limit N] - Show check-in history
+ *
+ * @returns Parsed command or null if not a check-in command
+ */
+export function parseCheckInCommand(text: string, botUserId: string): CheckInCommand | null {
+  const cleaned = cleanText(text, botUserId);
+
+  // Match: checkin history or check-in history with optional --limit N
+  if (/^check-?in\s+history(\s+--limit\s+\d+)?$/i.test(cleaned)) {
+    const limitMatch = cleaned.match(/--limit\s+(\d+)/i);
+    const limit = limitMatch ? parseInt(limitMatch[1], 10) : undefined;
+    return { type: "history", limit };
   }
 
   return null;

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   addDocument,
+  updateDocument,
   removeDocument,
   listDocuments,
   getKnowledgeBase,
   backfillDocuments,
+  backfillIfNeeded,
   getRandomDocument,
 } from "../docs";
 import type { Env } from "../types";
@@ -137,6 +139,86 @@ describe("addDocument", () => {
     await addDocument(mockEnv, "Searchable", "content for search", "U123");
 
     expect(indexDocument).toHaveBeenCalledWith("Searchable", "content for search", mockEnv);
+  });
+});
+
+describe("updateDocument", () => {
+  let mockKV: ReturnType<typeof createMockKV>;
+  let mockEnv: Env;
+
+  beforeEach(() => {
+    mockKV = createMockKV();
+    mockEnv = createMockEnv(mockKV);
+    vi.clearAllMocks();
+  });
+
+  it("updates existing document content", async () => {
+    await addDocument(mockEnv, "Test Doc", "Original content", "U123");
+    const result = await updateDocument(mockEnv, "Test Doc", "Updated content", "U456");
+
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Updated");
+    expect(result.message).toContain("Test Doc");
+    expect(mockKV._store.get("docs:content:test-doc")).toBe("Updated content");
+  });
+
+  it("updates document case-insensitively", async () => {
+    await addDocument(mockEnv, "My Document", "original", "U123");
+    const result = await updateDocument(mockEnv, "my document", "updated", "U456");
+
+    expect(result.success).toBe(true);
+    expect(mockKV._store.get("docs:content:my-document")).toBe("updated");
+  });
+
+  it("fails for non-existent document", async () => {
+    const result = await updateDocument(mockEnv, "Does Not Exist", "content", "U123");
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("No document titled");
+  });
+
+  it("rejects content exceeding max size", async () => {
+    await addDocument(mockEnv, "Small Doc", "small", "U123");
+    const largeContent = "x".repeat(50001);
+    const result = await updateDocument(mockEnv, "Small Doc", largeContent, "U456");
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("too large");
+  });
+
+  it("rejects update that would exceed total KB limit", async () => {
+    // Add 4 docs at 49000 chars each = 196000 chars total
+    for (let i = 0; i < 4; i++) {
+      await addDocument(mockEnv, `Doc ${i}`, "x".repeat(49000), "U123");
+    }
+    // Add a small doc to bring total to exactly 200000 (at limit)
+    await addDocument(mockEnv, "Small Doc", "x".repeat(4000), "U123");
+
+    // Try to update the small doc with 4001 chars
+    // New total would be: 200000 - 4000 + 4001 = 200001 > 200000 limit
+    // But 4001 < 50000 so per-doc limit passes
+    const result = await updateDocument(mockEnv, "Small Doc", "x".repeat(4001), "U456");
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("would exceed limit");
+  });
+
+  it("shows size change in message", async () => {
+    await addDocument(mockEnv, "Test Doc", "short", "U123");
+    const result = await updateDocument(mockEnv, "Test Doc", "much longer content here", "U456");
+
+    expect(result.success).toBe(true);
+    expect(result.message).toMatch(/[+-]\d+/); // Shows size change
+  });
+
+  it("re-indexes document for semantic search", async () => {
+    const { indexDocument } = await import("../embeddings");
+
+    await addDocument(mockEnv, "Searchable", "original", "U123");
+    vi.clearAllMocks();
+    await updateDocument(mockEnv, "Searchable", "updated for search", "U456");
+
+    expect(indexDocument).toHaveBeenCalledWith("Searchable", "updated for search", mockEnv);
   });
 });
 
@@ -378,5 +460,58 @@ describe("getRandomDocument", () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("Couldn't retrieve");
+  });
+});
+
+describe("backfillIfNeeded", () => {
+  let mockKV: ReturnType<typeof createMockKV>;
+  let mockEnv: Env;
+
+  beforeEach(() => {
+    mockKV = createMockKV();
+    mockEnv = {
+      SLACK_BOT_TOKEN: "xoxb-test",
+      SLACK_SIGNING_SECRET: "secret",
+      ANTHROPIC_API_KEY: "key",
+      HONEYCOMB_API_KEY: "honey",
+      DOCS_KV: mockKV as unknown as KVNamespace,
+      VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+      AI: { run: vi.fn() } as unknown as Ai,
+    };
+  });
+
+  it("skips backfill if last backfill was recent", async () => {
+    // Set last backfill to 1 hour ago (within 24 hour threshold)
+    const recentBackfill = Date.now() - 60 * 60 * 1000;
+    mockKV._store.set("sync:backfill:last", recentBackfill.toString());
+
+    const result = await backfillIfNeeded(mockEnv);
+
+    expect(result).toBe(false);
+  });
+
+  it("performs backfill if last backfill was long ago", async () => {
+    // Set last backfill to 25 hours ago (beyond 24 hour threshold)
+    const oldBackfill = Date.now() - 25 * 60 * 60 * 1000;
+    mockKV._store.set("sync:backfill:last", oldBackfill.toString());
+
+    const result = await backfillIfNeeded(mockEnv);
+
+    expect(result).toBe(true);
+  });
+
+  it("performs backfill if never done before", async () => {
+    const result = await backfillIfNeeded(mockEnv);
+
+    expect(result).toBe(true);
+  });
+
+  it("records backfill timestamp on success", async () => {
+    await backfillIfNeeded(mockEnv);
+
+    const stored = mockKV._store.get("sync:backfill:last");
+    expect(stored).toBeDefined();
+    const backfillTime = parseInt(stored!, 10);
+    expect(Date.now() - backfillTime).toBeLessThan(5000);
   });
 });

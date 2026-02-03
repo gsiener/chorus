@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { syncLinearProjects, fetchLinearProjects } from "../linear";
+import { syncLinearProjects, fetchLinearProjects, checkAndSyncIfNeeded } from "../linear";
 import type { Env } from "../types";
 
 describe("Linear Integration", () => {
@@ -155,5 +155,77 @@ describe("Linear Integration", () => {
     // Verify status was updated
     const initiative = JSON.parse(mockKvStore["initiatives:detail:existing-initiative"]);
     expect(initiative.status.value).toBe("active"); // "started" maps to "active"
+  });
+
+  describe("checkAndSyncIfNeeded", () => {
+    it("skips sync if last sync was recent", async () => {
+      // Set last sync to 1 minute ago
+      const recentSync = Date.now() - 60 * 1000;
+      mockKvStore["sync:linear:last"] = recentSync.toString();
+
+      // Stub fetch to verify it's not called
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const result = await checkAndSyncIfNeeded(mockEnv);
+
+      expect(result).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("performs sync if last sync was long ago", async () => {
+      // Set last sync to 7 hours ago (beyond 6 hour threshold)
+      const oldSync = Date.now() - 7 * 60 * 60 * 1000;
+      mockKvStore["sync:linear:last"] = oldSync.toString();
+
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          data: { projects: { nodes: [] } },
+        }),
+      }));
+
+      const result = await checkAndSyncIfNeeded(mockEnv);
+
+      expect(result).toBe(true);
+      expect(fetch).toHaveBeenCalled();
+    });
+
+    it("performs sync if never synced before", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          data: { projects: { nodes: [] } },
+        }),
+      }));
+
+      const result = await checkAndSyncIfNeeded(mockEnv);
+
+      expect(result).toBe(true);
+      expect(fetch).toHaveBeenCalled();
+    });
+
+    it("skips sync if LINEAR_API_KEY is not configured", async () => {
+      const envWithoutKey = { ...mockEnv, LINEAR_API_KEY: undefined };
+
+      const result = await checkAndSyncIfNeeded(envWithoutKey);
+
+      expect(result).toBe(false);
+    });
+
+    it("records sync timestamp on success", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          data: { projects: { nodes: [] } },
+        }),
+      }));
+
+      await checkAndSyncIfNeeded(mockEnv);
+
+      expect(mockKvStore["sync:linear:last"]).toBeDefined();
+      const syncTime = parseInt(mockKvStore["sync:linear:last"], 10);
+      expect(Date.now() - syncTime).toBeLessThan(5000); // Within 5 seconds
+    });
   });
 });

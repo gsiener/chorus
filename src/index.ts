@@ -3,13 +3,14 @@ import {
   parseDocCommand,
   parseInitiativeCommand,
   parseSearchCommand,
+  parseCheckInCommand,
   VALID_STATUSES,
   type InitiativeCommand,
 } from "./parseCommands";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
-import { convertThreadToMessages, generateResponse, ThreadInfo, CLAUDE_MODEL } from "./claude";
+import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
 import { TimeoutError } from "./http-utils";
-import { addDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument } from "./docs";
+import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import {
   addInitiative,
@@ -27,8 +28,8 @@ import {
   searchInitiatives,
 } from "./initiatives";
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
-import { syncLinearProjects } from "./linear";
-import { sendWeeklyCheckins } from "./checkins";
+import { syncLinearProjects, checkAndSyncIfNeeded } from "./linear";
+import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./checkins";
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { trace } from "@opentelemetry/api";
@@ -47,6 +48,16 @@ import {
   recordSlackLatency,
 } from "./telemetry";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
+import {
+  STATUS_EMOJIS,
+  getStatusEmoji,
+  RATE_LIMIT_WINDOW_SECONDS,
+  RATE_LIMIT_KEY_PREFIX,
+  RATE_LIMITS,
+  EVENT_DEDUP_TTL_SECONDS,
+  EVENT_DEDUP_KEY_PREFIX,
+  BOT_ID_CACHE_TTL_MS,
+} from "./constants";
 
 // OpenTelemetry configuration for Honeycomb export
 const otelConfig: ResolveConfigFn = (env: Env, _trigger) => ({
@@ -62,20 +73,7 @@ const otelConfig: ResolveConfigFn = (env: Env, _trigger) => ({
   },
 });
 
-// Rate limiting configuration (per user, per minute)
-const RATE_LIMIT_WINDOW_SECONDS = 60;
-const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
-
-// Command-specific rate limits
-const RATE_LIMITS: Record<string, number> = {
-  doc: 10,      // Doc add/remove: 10 per minute
-  search: 20,   // Search commands: 20 per minute (more lenient)
-  default: 30,  // Default for other commands
-};
-
-// Event deduplication (prevent duplicate responses from Slack retries)
-const EVENT_DEDUP_TTL_SECONDS = 60; // 1 minute
-const EVENT_DEDUP_KEY_PREFIX = "event:";
+// Rate limiting and event deduplication constants imported from ./constants
 
 /**
  * Check if user is rate limited for a specific command type
@@ -376,6 +374,94 @@ async function handleAsk(request: Request, env: Env): Promise<Response> {
 }
 
 /**
+ * Handle /api/stream - SSE streaming endpoint for Chorus responses
+ *
+ * GET /api/stream?question=<encoded question>
+ *
+ * Returns Server-Sent Events with progressive response:
+ * - data: {"chunk": "text"} for each text chunk
+ * - data: {"done": true, "inputTokens": N, "outputTokens": N} when complete
+ */
+async function handleStreamApi(request: Request, env: Env): Promise<Response> {
+  // Verify API key
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "GET") {
+    return new Response(JSON.stringify({ error: "Method not allowed. Use GET with ?question= parameter" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const url = new URL(request.url);
+  const question = url.searchParams.get("question");
+
+  if (!question) {
+    return new Response(JSON.stringify({ error: "Missing required parameter: question" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Stream API triggered:", question);
+
+  // Create a TransformStream for SSE
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  // Send SSE formatted data
+  const sendEvent = async (data: object) => {
+    await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+  };
+
+  // Start streaming response in the background
+  const messages = [{ role: "user" as const, content: question }];
+
+  // Process the stream
+  (async () => {
+    try {
+      const result = await generateResponseStreaming(
+        messages,
+        env,
+        async (chunk) => {
+          await sendEvent({ chunk });
+        }
+      );
+
+      // Send final event with completion info
+      await sendEvent({
+        done: true,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        cached: result.cached,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Stream API error:", errorMessage);
+      await sendEvent({ error: errorMessage });
+    } finally {
+      await writer.close();
+    }
+  })();
+
+  // Return SSE response
+  return new Response(readable, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
+}
+
+/**
  * Handle /api/docs requests for console-based document management
  */
 async function handleDocsApi(request: Request, env: Env): Promise<Response> {
@@ -525,10 +611,7 @@ async function handleSlashCommand(request: Request, env: Env): Promise<Response>
         if (initiativeResults.length > 0) {
           const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
           for (const result of initiativeResults) {
-            const statusEmoji = result.initiative.status === "active" ? "🟢" :
-              result.initiative.status === "proposed" ? "🟡" :
-              result.initiative.status === "completed" ? "✅" :
-              result.initiative.status === "paused" ? "⏸️" : "❌";
+            const statusEmoji = getStatusEmoji(result.initiative.status);
             initLines.push(`${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
           }
           sections.push(initLines.join("\n"));
@@ -575,6 +658,12 @@ export const handler = {
         );
       })
     );
+
+    // Run scheduled Linear sync (if interval elapsed)
+    ctx.waitUntil(checkAndSyncIfNeeded(env));
+
+    // Run scheduled document backfill (if interval elapsed)
+    ctx.waitUntil(backfillIfNeeded(env));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -603,6 +692,11 @@ export const handler = {
     // Route /api/ask to ask Chorus a question directly
     if (url.pathname === "/api/ask") {
       return handleAsk(request, env);
+    }
+
+    // Route /api/stream to SSE streaming endpoint
+    if (url.pathname === "/api/stream") {
+      return handleStreamApi(request, env);
     }
 
     // Route /slack/slash to slash command handler
@@ -756,10 +850,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       if (initiativeResults.length > 0) {
         const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
         for (const result of initiativeResults) {
-          const statusEmoji = result.initiative.status === "active" ? "🟢" :
-            result.initiative.status === "proposed" ? "🟡" :
-            result.initiative.status === "completed" ? "✅" :
-            result.initiative.status === "paused" ? "⏸️" : "❌";
+          const statusEmoji = getStatusEmoji(result.initiative.status);
           initLines.push(`\n${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
           initLines.push(`  Owner: <@${result.initiative.owner}>`);
           if (result.snippet !== result.initiative.name) {
@@ -968,6 +1059,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       } else if (docCommand.type === "add") {
         const result = await addDocument(env, docCommand.title, docCommand.content, user);
         response = result.message;
+      } else if (docCommand.type === "update") {
+        const result = await updateDocument(env, docCommand.title, docCommand.content, user);
+        response = result.message;
       } else if (docCommand.type === "backfill") {
         // Post initial message
         await postMessage(channel, "Starting backfill of documents for semantic search...", threadTs, env);
@@ -980,6 +1074,20 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
       await postMessage(channel, response, threadTs, env);
       return;
+    }
+
+    // Check for check-in commands
+    const checkInCommand = parseCheckInCommand(text, botUserId);
+
+    if (checkInCommand) {
+      recordCommand(`checkin:${checkInCommand.type}`);
+
+      if (checkInCommand.type === "history") {
+        const history = await listUserCheckIns(user, env, checkInCommand.limit);
+        const response = formatCheckInHistory(history);
+        await postMessage(channel, response, threadTs, env);
+        return;
+      }
     }
 
     // Check for check-briefs command
@@ -1049,9 +1157,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       throw new Error("Failed to post thinking message");
     }
 
-    // Generate response with thread context
+    // Generate response with thread context and user info
     const threadInfo: ThreadInfo | undefined = threadTs ? { channel, threadTs } : undefined;
-    const result = await generateResponse(messages, env, threadInfo);
+    const result = await generateResponse(messages, env, threadInfo, user);
 
     // Update with final response (with timing)
     const updateStart = Date.now();
@@ -1133,8 +1241,7 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
   }
 }
 
-// Cache the bot user ID with TTL (1 hour)
-const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000;
+// Cache the bot user ID with TTL (imported from constants)
 let cachedBotUserId: string | null = null;
 let botUserIdCacheExpiry = 0;
 

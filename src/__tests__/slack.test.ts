@@ -6,6 +6,7 @@ import {
   updateMessage,
   addReaction,
   postDirectMessage,
+  fetchUserInfo,
 } from "../slack";
 import type { Env } from "../types";
 
@@ -405,5 +406,118 @@ describe("postDirectMessage", () => {
 
     expect(result.ts).toBeNull();
     expect(result.error).toBe("message_post_failed");
+  });
+});
+
+describe("fetchUserInfo", () => {
+  let mockKvStore: Record<string, string>;
+  let mockEnv: Env;
+
+  beforeEach(() => {
+    mockKvStore = {};
+    mockEnv = {
+      SLACK_BOT_TOKEN: "xoxb-test-token",
+      SLACK_SIGNING_SECRET: "test-secret",
+      ANTHROPIC_API_KEY: "test-key",
+      HONEYCOMB_API_KEY: "test-honeycomb-key",
+      DOCS_KV: {
+        get: vi.fn((key: string) => Promise.resolve(mockKvStore[key] || null)),
+        put: vi.fn((key: string, value: string) => {
+          mockKvStore[key] = value;
+          return Promise.resolve();
+        }),
+      } as unknown as KVNamespace,
+      VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+      AI: { run: vi.fn() } as unknown as Ai,
+    };
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches user info from Slack API", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        ok: true,
+        user: {
+          id: "U123",
+          name: "testuser",
+          real_name: "Test User",
+          profile: {
+            title: "Engineer",
+            email: "test@example.com",
+          },
+        },
+      }))
+    );
+
+    const result = await fetchUserInfo("U123", mockEnv);
+
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe("U123");
+    expect(result!.name).toBe("testuser");
+    expect(result!.realName).toBe("Test User");
+    expect(result!.title).toBe("Engineer");
+    expect(result!.email).toBe("test@example.com");
+  });
+
+  it("returns cached user info if available", async () => {
+    const cachedUser = {
+      id: "U123",
+      name: "cacheduser",
+      realName: "Cached User",
+      title: "Designer",
+      email: "cached@example.com",
+    };
+    mockKvStore["user:info:U123"] = JSON.stringify(cachedUser);
+
+    const result = await fetchUserInfo("U123", mockEnv);
+
+    expect(result).toEqual(cachedUser);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("caches fetched user info", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        ok: true,
+        user: {
+          id: "U456",
+          name: "newuser",
+          real_name: "New User",
+          profile: {},
+        },
+      }))
+    );
+
+    await fetchUserInfo("U456", mockEnv);
+
+    expect(mockEnv.DOCS_KV.put).toHaveBeenCalledWith(
+      "user:info:U456",
+      expect.any(String),
+      expect.objectContaining({ expirationTtl: expect.any(Number) })
+    );
+  });
+
+  it("returns null on API error", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "user_not_found" }))
+    );
+
+    const result = await fetchUserInfo("U999", mockEnv);
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when user not in response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }))
+    );
+
+    const result = await fetchUserInfo("U999", mockEnv);
+
+    expect(result).toBeNull();
   });
 });

@@ -6,6 +6,7 @@
 
 import { INITIATIVES_KV } from "./kv";
 import type { Env, Initiative, InitiativeStatusValue } from "./types";
+import { LINEAR_SYNC_INTERVAL_MS, LAST_LINEAR_SYNC_KEY } from "./constants";
 
 // Linear GraphQL endpoint
 const LINEAR_API_URL = "https://api.linear.app/graphql";
@@ -253,4 +254,40 @@ export async function syncLinearProjects(
  */
 export function getLinearProjectUrl(linearProjectId: string): string {
   return `https://linear.app/project/${linearProjectId}`;
+}
+
+/**
+ * Check if Linear sync is needed and perform it if so
+ * Returns true if sync was performed
+ */
+export async function checkAndSyncIfNeeded(env: Env): Promise<boolean> {
+  const lastSync = await env.DOCS_KV.get(LAST_LINEAR_SYNC_KEY);
+  const now = Date.now();
+
+  if (lastSync) {
+    const lastSyncTime = parseInt(lastSync, 10);
+    if (now - lastSyncTime < LINEAR_SYNC_INTERVAL_MS) {
+      console.log(`Skipping Linear sync (last sync ${Math.round((now - lastSyncTime) / 1000 / 60)} minutes ago)`);
+      return false;
+    }
+  }
+
+  // Check if LINEAR_API_KEY is configured
+  if (!env.LINEAR_API_KEY) {
+    console.log("LINEAR_API_KEY not configured, skipping scheduled sync");
+    return false;
+  }
+
+  console.log("Running scheduled Linear sync...");
+  const result = await syncLinearProjects(env, "scheduled");
+
+  if (result.success) {
+    // Record sync time
+    await env.DOCS_KV.put(LAST_LINEAR_SYNC_KEY, now.toString());
+    console.log(`Scheduled Linear sync complete: ${result.message}`);
+  } else {
+    console.error(`Scheduled Linear sync failed: ${result.message}`);
+  }
+
+  return result.success;
 }

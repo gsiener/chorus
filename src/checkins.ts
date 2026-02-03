@@ -10,13 +10,27 @@
 import type { Env, InitiativeMetadata, Initiative } from "./types";
 import { postDirectMessage } from "./slack";
 import { INITIATIVES_KV } from "./kv";
+import {
+  getStatusEmoji,
+  MIN_CHECKIN_INTERVAL_MS,
+  TEST_CHECKIN_INTERVAL_MS,
+  CHECKIN_KV_TTL_SECONDS,
+} from "./constants";
 
 // KV keys
 const LAST_CHECKIN_PREFIX = "checkin:last:";
+const CHECKIN_HISTORY_PREFIX = "checkin:history:";
+const MAX_CHECKIN_HISTORY = 10;
 
-// Rate limiting intervals
-const MIN_CHECKIN_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days (production)
-const TEST_CHECKIN_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20 hours (allows daily in test mode)
+/**
+ * Structured record of a check-in that was sent
+ */
+export interface CheckInRecord {
+  sentAt: string;
+  initiativeCount: number;
+  missingPrd: number;
+  missingMetrics: number;
+}
 
 interface InitiativeWithDetails extends InitiativeMetadata {
   description?: string;
@@ -91,11 +105,71 @@ async function shouldSendCheckin(userId: string, env: Env): Promise<boolean> {
 
 /**
  * Record that we sent a check-in to this user
+ * Stores both the timestamp (for rate limiting) and a structured record (for history)
  */
-async function recordCheckin(userId: string, env: Env): Promise<void> {
-  await env.DOCS_KV.put(`${LAST_CHECKIN_PREFIX}${userId}`, Date.now().toString(), {
-    expirationTtl: 60 * 60 * 24 * 14, // Keep for 2 weeks
+async function recordCheckin(
+  userId: string,
+  env: Env,
+  record?: Omit<CheckInRecord, "sentAt">
+): Promise<void> {
+  const now = Date.now();
+
+  // Store timestamp for rate limiting (existing behavior)
+  await env.DOCS_KV.put(`${LAST_CHECKIN_PREFIX}${userId}`, now.toString(), {
+    expirationTtl: CHECKIN_KV_TTL_SECONDS,
   });
+
+  // Store structured history if record provided
+  if (record) {
+    const historyKey = `${CHECKIN_HISTORY_PREFIX}${userId}`;
+    const existingData = await env.DOCS_KV.get(historyKey);
+    const history: CheckInRecord[] = existingData ? JSON.parse(existingData) : [];
+
+    // Add new record at the beginning
+    history.unshift({
+      sentAt: new Date(now).toISOString(),
+      ...record,
+    });
+
+    // Keep only the most recent records
+    const trimmedHistory = history.slice(0, MAX_CHECKIN_HISTORY);
+
+    await env.DOCS_KV.put(historyKey, JSON.stringify(trimmedHistory));
+  }
+}
+
+/**
+ * Get the most recent check-in record for a user
+ */
+export async function getLastCheckIn(userId: string, env: Env): Promise<CheckInRecord | null> {
+  const historyKey = `${CHECKIN_HISTORY_PREFIX}${userId}`;
+  const data = await env.DOCS_KV.get(historyKey);
+
+  if (!data) {
+    return null;
+  }
+
+  const history = JSON.parse(data) as CheckInRecord[];
+  return history.length > 0 ? history[0] : null;
+}
+
+/**
+ * List check-in history for a user
+ */
+export async function listUserCheckIns(
+  userId: string,
+  env: Env,
+  limit?: number
+): Promise<CheckInRecord[]> {
+  const historyKey = `${CHECKIN_HISTORY_PREFIX}${userId}`;
+  const data = await env.DOCS_KV.get(historyKey);
+
+  if (!data) {
+    return [];
+  }
+
+  const history = JSON.parse(data) as CheckInRecord[];
+  return limit ? history.slice(0, limit) : history;
 }
 
 /**
@@ -124,7 +198,7 @@ function formatCheckinMessage(initiatives: InitiativeWithDetails[]): string {
     const inits = byStatus.get(status);
     if (!inits || inits.length === 0) continue;
 
-    const emoji = status === "active" ? "🟢" : status === "proposed" ? "🟡" : "⏸️";
+    const emoji = getStatusEmoji(status);
     lines.push("");
     lines.push(`*${status.charAt(0).toUpperCase() + status.slice(1)}:*`);
 
@@ -172,7 +246,12 @@ async function sendTestCheckin(env: Env, testUser: string): Promise<{ success: b
   if (await shouldSendCheckin(testUser, env)) {
     const result = await postDirectMessage(testUser, testMessage, env);
     if (result.ts) {
-      await recordCheckin(testUser, env);
+      // Record with zero initiatives (test mode)
+      await recordCheckin(testUser, env, {
+        initiativeCount: 0,
+        missingPrd: 0,
+        missingMetrics: 0,
+      });
       return {
         success: true,
         message: "Sent test check-in (no initiatives).",
@@ -208,13 +287,51 @@ async function processOwnerCheckin(env: Env, ownerId: string, initiatives: Initi
   const result = await postDirectMessage(ownerId, message, env);
 
   if (result.ts) {
-    await recordCheckin(ownerId, env);
+    // Record with structured history
+    await recordCheckin(ownerId, env, {
+      initiativeCount: initiatives.length,
+      missingPrd: initiatives.filter((i) => !i.hasPrd).length,
+      missingMetrics: initiatives.filter((i) => !i.hasMetrics).length,
+    });
     console.log(`Sent check-in to ${ownerId}`);
     return true;
   } else {
     console.error(`Failed to send check-in to ${ownerId}: ${result.error}`);
     return false;
   }
+}
+
+/**
+ * Format check-in history for display
+ */
+export function formatCheckInHistory(history: CheckInRecord[]): string {
+  if (history.length === 0) {
+    return "No check-in history found. Check-ins are sent weekly to initiative owners.";
+  }
+
+  const lines: string[] = [
+    `*Check-in History* (${history.length} record${history.length === 1 ? "" : "s"})`,
+    "",
+  ];
+
+  for (const record of history) {
+    const date = new Date(record.sentAt).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    const gaps: string[] = [];
+    if (record.missingPrd > 0) gaps.push(`${record.missingPrd} missing PRD`);
+    if (record.missingMetrics > 0) gaps.push(`${record.missingMetrics} missing metrics`);
+
+    let line = `• ${date}: ${record.initiativeCount} initiative${record.initiativeCount === 1 ? "" : "s"}`;
+    if (gaps.length > 0) {
+      line += ` _(${gaps.join(", ")})_`;
+    }
+    lines.push(line);
+  }
+
+  return lines.join("\n");
 }
 
 /**

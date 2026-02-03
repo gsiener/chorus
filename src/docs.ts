@@ -4,14 +4,18 @@
 
 import type { Env } from "./types";
 import { indexDocument, removeDocumentFromIndex } from "./embeddings";
+import {
+  MAX_DOC_SIZE,
+  MAX_TOTAL_KB_SIZE,
+  MAX_TITLE_LENGTH,
+  DEFAULT_DOC_PAGE_SIZE,
+  DOC_BACKFILL_INTERVAL_MS,
+  LAST_BACKFILL_KEY,
+} from "./constants";
 
-// Constants
+// KV keys
 const DOCS_INDEX_KEY = "docs:index";
 const DOCS_PREFIX = "docs:content:";
-const MAX_DOC_SIZE = 50000;
-const MAX_TOTAL_KB_SIZE = 200000;
-const MAX_TITLE_LENGTH = 100;
-const DEFAULT_DOC_PAGE_SIZE = 10;
 
 // Typed error classes
 
@@ -204,6 +208,73 @@ export async function addDocument(
   };
 }
 
+export async function updateDocument(
+  env: Env,
+  title: string,
+  newContent: string,
+  updatedBy: string
+): Promise<{ success: boolean; message: string }> {
+  const index = await getIndex(env);
+
+  const docIndex = index.documents.findIndex(
+    (d) => d.title.toLowerCase() === title.toLowerCase()
+  );
+
+  if (docIndex === -1) {
+    return { success: false, message: `No document titled "${title}" found.` };
+  }
+
+  if (newContent.length > MAX_DOC_SIZE) {
+    return {
+      success: false,
+      message: `Updated document too large (${newContent.length} chars). Max size is ${MAX_DOC_SIZE} chars.`,
+    };
+  }
+
+  const doc = index.documents[docIndex];
+  const oldSize = doc.charCount;
+  const sizeDiff = newContent.length - oldSize;
+
+  // Check total KB size limit
+  const currentTotal = index.documents.reduce((sum, d) => sum + d.charCount, 0);
+  if (currentTotal + sizeDiff > MAX_TOTAL_KB_SIZE) {
+    return {
+      success: false,
+      message: `Knowledge base would exceed limit. Current: ${currentTotal} chars, new content adds ${sizeDiff} chars, limit: ${MAX_TOTAL_KB_SIZE} chars.`,
+    };
+  }
+
+  // Update content in KV
+  const key = titleToKey(doc.title);
+  await env.DOCS_KV.put(key, newContent);
+
+  // Update metadata
+  index.documents[docIndex] = {
+    ...doc,
+    charCount: newContent.length,
+    addedAt: new Date().toISOString(), // Update timestamp
+    addedBy: updatedBy,
+  };
+  await saveIndex(env, index);
+
+  // Re-index embeddings
+  let indexMessage = "";
+  try {
+    const indexResult = await indexDocument(doc.title, newContent, env);
+    if (indexResult.success) {
+      indexMessage = ` Re-indexed in ${indexResult.chunksIndexed} chunk${indexResult.chunksIndexed === 1 ? "" : "s"}.`;
+    }
+  } catch {
+    // Ignore indexing errors
+  }
+
+  const sizeChange = sizeDiff > 0 ? `+${sizeDiff}` : `${sizeDiff}`;
+  return {
+    success: true,
+    message: `Updated "${doc.title}" (${newContent.length} chars, ${sizeChange} from previous).${indexMessage}`,
+  };
+}
+
 export async function removeDocument(
   env: Env,
   title: string
@@ -372,4 +443,34 @@ export async function backfillDocuments(
   const message = `Backfill complete. Indexed: ${indexed}, Failed: ${failed}${errors.length > 0 ? `\n\nErrors:\n• ${errors.slice(0, 5).join("\n• ")}${errors.length > 5 ? `\n... and ${errors.length - 5} more` : ""}` : ""}`;
 
   return { success: failed === 0, message, indexed, failed };
+}
+
+/**
+ * Check if document backfill is needed and perform it if so
+ * Returns true if backfill was performed
+ */
+export async function backfillIfNeeded(env: Env): Promise<boolean> {
+  const lastBackfill = await env.DOCS_KV.get(LAST_BACKFILL_KEY);
+  const now = Date.now();
+
+  if (lastBackfill) {
+    const lastBackfillTime = parseInt(lastBackfill, 10);
+    if (now - lastBackfillTime < DOC_BACKFILL_INTERVAL_MS) {
+      console.log(`Skipping doc backfill (last backfill ${Math.round((now - lastBackfillTime) / 1000 / 60 / 60)} hours ago)`);
+      return false;
+    }
+  }
+
+  console.log("Running scheduled document backfill...");
+  const result = await backfillDocuments(env);
+
+  if (result.success) {
+    // Record backfill time
+    await env.DOCS_KV.put(LAST_BACKFILL_KEY, now.toString());
+    console.log(`Scheduled doc backfill complete: ${result.message}`);
+  } else {
+    console.error(`Scheduled doc backfill failed: ${result.message}`);
+  }
+
+  return result.success;
 }

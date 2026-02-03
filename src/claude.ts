@@ -3,6 +3,7 @@ import { getKnowledgeBase } from "./docs";
 import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
 import { getPrioritiesContext } from "./linear-priorities";
 import { fetchWithRetry, TimeoutError } from "./http-utils";
+import { fetchUserInfo, type UserInfo } from "./slack";
 import {
   recordGenAiMetrics,
   recordGenAiInput,
@@ -81,6 +82,25 @@ function convertToSlackFormat(text: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
 }
 
+/**
+ * Format user info for injection into system prompt
+ */
+function formatUserContext(user: UserInfo): string {
+  const parts: string[] = [];
+
+  if (user.realName) {
+    parts.push(`The user is ${user.realName} (Slack: @${user.name}).`);
+  } else {
+    parts.push(`The user is @${user.name}.`);
+  }
+
+  if (user.title) {
+    parts.push(`Their role is: ${user.title}.`);
+  }
+
+  return parts.join(" ");
+}
+
 export interface ThreadInfo {
   channel: string;
   threadTs: string;
@@ -89,7 +109,8 @@ export interface ThreadInfo {
 export async function generateResponse(
   messages: ClaudeMessage[],
   env: Env,
-  threadInfo?: ThreadInfo
+  threadInfo?: ThreadInfo,
+  userId?: string
 ): Promise<GenerateResponseResult> {
   // Check cache first
   const cacheKey = getCacheKey(messages);
@@ -122,13 +143,14 @@ export async function generateResponse(
     threadContext
   );
 
-  // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
+  // Load full knowledge base, initiatives context, priorities, gaps, and user info in parallel
   const kbStartTime = Date.now();
-  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge, userInfo] = await Promise.all([
     getKnowledgeBase(env),
     getInitiativesContext(env),
     getPrioritiesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
+    userId ? fetchUserInfo(userId, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
 
@@ -168,6 +190,12 @@ export async function generateResponse(
   }
   if (gapNudge) {
     systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
+  }
+
+  // Inject user context for personalized responses
+  if (userInfo) {
+    const userContext = formatUserContext(userInfo);
+    systemPrompt += `\n\n## About the User\n\n${userContext}`;
   }
 
   // Record input BEFORE the API call so attributes are captured
