@@ -249,36 +249,52 @@ interface ClaudeToolResponse {
 
 /**
  * Check if a message might be an initiative-related natural language command
+ *
+ * PDD-65: We need to be careful here. General questions about initiatives like
+ * "what are the initiatives?" or "list all initiatives" should go to Claude,
+ * which has R&D priorities in its context. Only management commands that
+ * modify a specific initiative should trigger NLP tool calling.
+ *
+ * Trigger NLP for: "mark Project X as active", "set status of X to completed"
+ * Don't trigger for: "what are our initiatives?", "list all initiatives"
  */
 export function mightBeInitiativeCommand(text: string): boolean {
   const cleanText = text.toLowerCase();
 
-  // Keywords that suggest initiative management intent
-  const keywords = [
-    "initiative",
-    "project",
-    "mark as",
-    "set status",
-    "change status",
-    "assign to",
-    "owned by",
-    "create",
-    "add metric",
-    "update",
-    "rename",
-    "remove",
-    "delete",
-    "show me",
-    "what's happening with",
-    "status of",
-    "active",
-    "paused",
-    "completed",
-    "cancelled",
-    "proposed",
+  // Patterns that indicate READ-ONLY/QUERY intent - let Claude handle these
+  const queryPatterns = [
+    /\blist\s+(all\s+)?(the\s+)?initiatives?\b/,  // "list all initiatives", "list the initiatives"
+    /\bwhat\s+(are|is)\s+(our|the|my)\s+initiatives?\b/,  // "what are our initiatives"
+    /\bshow\s+(me\s+)?(the\s+)?initiatives\b/,  // "show me the initiatives"
+    /\btell\s+me\s+about\s+(the\s+)?initiatives\b/,  // "tell me about the initiatives"
+    /\bwhat\s+initiatives\b/,  // "what initiatives are we working on"
+    /\bcan\s+you\s+list\b.*\binitiatives?\b/,  // "can you list all the initiatives"
   ];
 
-  return keywords.some(keyword => cleanText.includes(keyword));
+  // If it matches a query pattern, let Claude handle it
+  if (queryPatterns.some(pattern => pattern.test(cleanText))) {
+    return false;
+  }
+
+  // Patterns that suggest initiative MANAGEMENT intent (not just queries)
+  // These require a specific initiative name or action
+  const managementPatterns = [
+    /\bmark\s+\S+.*\s+as\s+(active|paused|completed|cancelled|proposed)\b/,  // "mark X as active"
+    /\bset\s+status\b/,
+    /\bchange\s+status\b/,
+    /\bassign\s+to\b/,
+    /\bowned\s+by\b/,
+    /\badd\s+metric\b/,
+    /\bupdate\s+status\b/,
+    /\brename\s+initiative\b/,
+    /\bremove\s+initiative\b/,
+    /\bdelete\s+initiative\b/,
+    /\bcreate\s+initiative\b/,
+    /\bwhat's\s+happening\s+with\b/,  // asking about a specific initiative
+    /\bstatus\s+of\b/,  // asking about a specific initiative's status
+  ];
+
+  return managementPatterns.some(pattern => pattern.test(cleanText));
 }
 
 /**

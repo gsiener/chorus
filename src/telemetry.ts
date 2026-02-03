@@ -48,7 +48,7 @@
  * high-cardinality string attributes well (wide events approach).
  */
 
-import { trace, SpanStatusCode, Span } from "@opentelemetry/api";
+import { trace, SpanStatusCode, Span, Attributes, AttributeValue } from "@opentelemetry/api";
 
 /**
  * Standard GenAI system identifiers per OTel spec
@@ -69,6 +69,30 @@ export type GenAiSystem = (typeof GEN_AI_SYSTEMS)[keyof typeof GEN_AI_SYSTEMS];
  */
 export function getActiveSpan(): Span | undefined {
   return trace.getActiveSpan();
+}
+
+/**
+ * Safely set attributes on a span, handling cases where OTel is not fully initialized
+ */
+function safeSetAttributes(span: Span | undefined, attributes: Attributes): void {
+  if (!span || typeof span.setAttributes !== "function") return;
+  try {
+    span.setAttributes(attributes);
+  } catch {
+    // Silently ignore OTel errors - telemetry should never break the app
+  }
+}
+
+/**
+ * Safely set a single attribute on a span
+ */
+function safeSetAttribute(span: Span | undefined, key: string, value: AttributeValue): void {
+  if (!span || typeof span.setAttribute !== "function") return;
+  try {
+    span.setAttribute(key, value);
+  } catch {
+    // Silently ignore OTel errors - telemetry should never break the app
+  }
 }
 
 /**
@@ -461,7 +485,7 @@ export function recordRequestContext(context: {
   eventType: "app_mention" | "reaction_added" | "scheduled";
 }): void {
   const span = getActiveSpan();
-  if (!span) return;
+  if (!span || typeof span.setAttributes !== "function") return;
 
   span.setAttributes({
     // User context
@@ -476,7 +500,7 @@ export function recordRequestContext(context: {
     "slack.is_thread": context.isThread,
   });
 
-  if (context.threadTs) {
+  if (context.threadTs && typeof span.setAttribute === "function") {
     span.setAttribute("slack.thread_ts", context.threadTs);
   }
 }

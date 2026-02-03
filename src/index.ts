@@ -760,31 +760,32 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
   const event = payload.event as SlackAppMentionEvent;
   const { channel, ts, thread_ts, text, user, files } = event;
 
-  // Record rich request context for wide events
-  recordRequestContext({
-    userId: user,
-    channel,
-    messageLength: text.length,
-    isThread: !!thread_ts,
-    threadTs: thread_ts,
-    hasFiles: !!(files && files.length > 0),
-    fileCount: files?.length ?? 0,
-    eventType: "app_mention",
-  });
-
-  // Add GenAI context to the current trace span
-  const span = trace.getActiveSpan();
-  span?.setAttributes({
-    // GenAI context (OTel semantic conventions)
-    "gen_ai.operation.name": "chat",
-    "gen_ai.system": "anthropic",
-    "gen_ai.request.model": CLAUDE_MODEL,
-  });
-
   // Track thinking message for error handling
   let thinkingTs: string | null = null;
 
   try {
+    // Record rich request context for wide events (inside try to catch OTel errors)
+    recordRequestContext({
+      userId: user,
+      channel,
+      messageLength: text.length,
+      isThread: !!thread_ts,
+      threadTs: thread_ts,
+      hasFiles: !!(files && files.length > 0),
+      fileCount: files?.length ?? 0,
+      eventType: "app_mention",
+    });
+
+    // Add GenAI context to the current trace span (with defensive check for test env)
+    const span = trace.getActiveSpan();
+    if (span && typeof span.setAttributes === "function") {
+      span.setAttributes({
+        // GenAI context (OTel semantic conventions)
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": "anthropic",
+        "gen_ai.request.model": CLAUDE_MODEL,
+      });
+    }
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
     const cleanedText = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
@@ -919,6 +920,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
     // Check for initiative commands
     const initCommand = parseInitiativeCommand(text, botUserId);
+    console.log(`PDD-65 DEBUG: text="${cleanedText}", initCommand=${JSON.stringify(initCommand)}`);
 
     if (initCommand) {
       recordCommand(`initiative:${initCommand.type}`);

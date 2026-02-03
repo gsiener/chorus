@@ -1,6 +1,6 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
-import { getInitiativesContext, detectInitiativeGaps } from "./initiatives";
+import { detectInitiativeGaps } from "./initiatives";
 import { getPrioritiesContext } from "./linear-priorities";
 import { fetchWithRetry, TimeoutError } from "./http-utils";
 import { fetchUserInfo, type UserInfo } from "./slack";
@@ -143,11 +143,11 @@ export async function generateResponse(
     threadContext
   );
 
-  // Load full knowledge base, initiatives context, priorities, gaps, and user info in parallel
+  // Load full knowledge base, priorities, gaps, and user info in parallel
+  // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge, userInfo] = await Promise.all([
+  const [knowledgeBase, prioritiesContext, gapNudge, userInfo] = await Promise.all([
     getKnowledgeBase(env),
-    getInitiativesContext(env),
     getPrioritiesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
     userId ? fetchUserInfo(userId, env) : Promise.resolve(null),
@@ -180,11 +180,19 @@ export async function generateResponse(
   }
 
   if (prioritiesContext) {
-    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\nWhen mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.\n\n${prioritiesContext}`;
+    systemPrompt += `\n\n## R&D Priorities (from Linear)
+
+IMPORTANT: When users ask about "initiatives", "what are we working on", "priorities", or similar general questions about the roadmap, ALWAYS refer to this R&D Priorities section. These are the company's strategic initiatives.
+
+When mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.
+
+${prioritiesContext}`;
   }
-  if (initiativesContext) {
-    systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
-  }
+  // NOTE: Tracked initiatives (from getInitiativesContext) are intentionally NOT included
+  // in Claude's context. They caused confusion when users asked about "initiatives" -
+  // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
+  // Users can access tracked initiatives via the `initiatives` command.
+  // See PDD-65 for details.
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }
@@ -315,10 +323,10 @@ export async function generateResponseStreaming(
   const query = lastUserMessage?.content || "";
 
   // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
+  // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [knowledgeBase, initiativesContext, prioritiesContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, prioritiesContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
-    getInitiativesContext(env),
     getPrioritiesContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
@@ -343,11 +351,19 @@ export async function generateResponseStreaming(
 
   let systemPrompt = SYSTEM_PROMPT;
   if (prioritiesContext) {
-    systemPrompt += `\n\n## R&D Priorities (from Linear)\n\nWhen mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.\n\n${prioritiesContext}`;
+    systemPrompt += `\n\n## R&D Priorities (from Linear)
+
+IMPORTANT: When users ask about "initiatives", "what are we working on", "priorities", or similar general questions about the roadmap, ALWAYS refer to this R&D Priorities section. These are the company's strategic initiatives.
+
+When mentioning any initiative by name, ALWAYS hyperlink it using the Slack format: <url|Name>. Each initiative below has its Linear URL included.
+
+${prioritiesContext}`;
   }
-  if (initiativesContext) {
-    systemPrompt += `\n\n## Active Initiatives\n\n${initiativesContext}`;
-  }
+  // NOTE: Tracked initiatives (from getInitiativesContext) are intentionally NOT included
+  // in Claude's context. They caused confusion when users asked about "initiatives" -
+  // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
+  // Users can access tracked initiatives via the `initiatives` command.
+  // See PDD-65 for details.
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }

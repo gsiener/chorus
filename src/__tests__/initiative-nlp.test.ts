@@ -32,13 +32,22 @@ function createMockEnv(kv = createMockKV()): Env {
 }
 
 describe("mightBeInitiativeCommand", () => {
-  it("returns true for messages with initiative keywords", () => {
+  it("returns true for management commands (PDD-65)", () => {
     expect(mightBeInitiativeCommand("mark the mobile app as active")).toBe(true);
-    expect(mightBeInitiativeCommand("create an initiative for Q1")).toBe(true);
-    expect(mightBeInitiativeCommand("show me the project status")).toBe(true);
     expect(mightBeInitiativeCommand("change status of dashboard to completed")).toBe(true);
     expect(mightBeInitiativeCommand("what's happening with the API redesign")).toBe(true);
-    expect(mightBeInitiativeCommand("assign initiative to @user")).toBe(true);
+    expect(mightBeInitiativeCommand("set status of Project X to paused")).toBe(true);
+    expect(mightBeInitiativeCommand("add metric to Dashboard")).toBe(true);
+    expect(mightBeInitiativeCommand("assign to @user")).toBe(true);
+  });
+
+  it("returns false for general questions about initiatives (PDD-65)", () => {
+    // These should go to Claude, which has R&D priorities in context
+    expect(mightBeInitiativeCommand("what are our initiatives")).toBe(false);
+    expect(mightBeInitiativeCommand("list all initiatives")).toBe(false);
+    expect(mightBeInitiativeCommand("show me the initiatives")).toBe(false);
+    expect(mightBeInitiativeCommand("can you list all the initiatives")).toBe(false);
+    expect(mightBeInitiativeCommand("tell me about the initiatives")).toBe(false);
   });
 
   it("returns false for unrelated messages", () => {
@@ -48,8 +57,8 @@ describe("mightBeInitiativeCommand", () => {
   });
 
   it("is case insensitive", () => {
-    expect(mightBeInitiativeCommand("MARK INITIATIVE AS ACTIVE")).toBe(true);
-    expect(mightBeInitiativeCommand("Create Initiative")).toBe(true);
+    expect(mightBeInitiativeCommand("MARK MY PROJECT AS ACTIVE")).toBe(true);
+    expect(mightBeInitiativeCommand("SET STATUS to completed")).toBe(true);
   });
 });
 
