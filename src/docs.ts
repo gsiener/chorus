@@ -12,6 +12,12 @@ import {
   DOC_BACKFILL_INTERVAL_MS,
   LAST_BACKFILL_KEY,
 } from "./constants";
+import {
+  calculatePagination,
+  formatPaginationHeader,
+  formatMorePagesHint,
+  formatDate,
+} from "./primitives";
 
 // KV keys
 const DOCS_INDEX_KEY = "docs:index";
@@ -315,31 +321,23 @@ export async function listDocuments(
     return "The knowledge base is empty. Add documents with:\n`@Chorus add doc \"Title\": Your content here...`";
   }
 
-  const totalItems = index.documents.length;
-  const page = Math.max(1, pagination?.page ?? 1);
-  const pageSize = Math.max(1, Math.min(50, pagination?.pageSize ?? DEFAULT_DOC_PAGE_SIZE));
-  const totalPages = Math.ceil(totalItems / pageSize);
+  const { paginatedItems, pagination: paginationInfo } = calculatePagination(
+    index.documents,
+    pagination?.page ?? 1,
+    pagination?.pageSize ?? DEFAULT_DOC_PAGE_SIZE
+  );
 
-  const startIndex = (page - 1) * pageSize;
-  const paginatedDocs = index.documents.slice(startIndex, startIndex + pageSize);
-  const hasMore = page < totalPages;
-
-  const lines = paginatedDocs.map((doc) => {
-    const date = new Date(doc.addedAt).toLocaleDateString();
+  const lines = paginatedItems.map((doc) => {
+    const date = formatDate(doc.addedAt);
     return `• *${doc.title}* (${doc.charCount} chars, added ${date})`;
   });
 
-  const headerParts = ["*Knowledge Base*"];
-  if (totalPages > 1) {
-    headerParts.push(`(page ${page}/${totalPages}, ${totalItems} docs)`);
-  } else {
-    headerParts.push(`(${totalItems} docs)`);
-  }
+  const header = `*Knowledge Base* ${formatPaginationHeader(paginationInfo, "docs")}`;
+  let result = `${header}\n\n${lines.join("\n")}`;
 
-  let result = `${headerParts.join(" ")}\n\n${lines.join("\n")}`;
-
-  if (hasMore) {
-    result += `\n\n_Use \`docs --page ${page + 1}\` for more_`;
+  const moreHint = formatMorePagesHint(paginationInfo, "docs");
+  if (moreHint) {
+    result += `\n\n${moreHint}`;
   }
 
   return result;

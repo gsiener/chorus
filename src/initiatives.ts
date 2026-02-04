@@ -6,6 +6,14 @@
  */
 
 import { INITIATIVES_KV } from "./kv";
+import {
+  calculatePagination,
+  formatPaginationHeader,
+  formatMorePagesHint,
+  formatDate,
+  extractSnippet,
+  type PaginationInfo,
+} from "./primitives";
 import type {
   Env,
   Initiative,
@@ -95,22 +103,16 @@ export async function listInitiatives(
     initiatives = initiatives.filter((i) => i.status === filters.status);
   }
 
-  const totalItems = initiatives.length;
-  const page = Math.max(1, pagination?.page ?? 1);
-  const pageSize = Math.max(1, Math.min(50, pagination?.pageSize ?? DEFAULT_PAGE_SIZE));
-  const totalPages = Math.ceil(totalItems / pageSize);
-
-  // Apply pagination
-  const startIndex = (page - 1) * pageSize;
-  const paginatedItems = initiatives.slice(startIndex, startIndex + pageSize);
+  const { paginatedItems, pagination: paginationInfo } = calculatePagination(
+    initiatives,
+    pagination?.page ?? 1,
+    pagination?.pageSize ?? DEFAULT_PAGE_SIZE,
+    50 // maxPageSize
+  );
 
   return {
     items: paginatedItems,
-    page,
-    pageSize,
-    totalItems,
-    totalPages,
-    hasMore: page < totalPages,
+    ...paginationInfo,
   };
 }
 
@@ -228,6 +230,39 @@ export async function addInitiative(
 }
 
 /**
+ * Generic helper to update an initiative field.
+ * Handles the common pattern: get, validate, update, save, optionally update index.
+ */
+async function updateInitiativeField(
+  env: Env,
+  idOrName: string,
+  updater: (initiative: Initiative, now: string) => void,
+  updateIndex: boolean = false
+): Promise<{ success: boolean; message: string; initiative?: Initiative }> {
+  const initiative = await getInitiative(env, idOrName);
+  if (!initiative) {
+    return { success: false, message: `Initiative "${idOrName}" not found.` };
+  }
+
+  const now = new Date().toISOString();
+  updater(initiative, now);
+  initiative.updatedAt = now;
+
+  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
+
+  if (updateIndex) {
+    const index = await getIndex(env);
+    const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
+    if (metaIndex >= 0) {
+      index.initiatives[metaIndex] = toMetadata(initiative);
+      await saveIndex(env, index);
+    }
+  }
+
+  return { success: true, message: "", initiative };
+}
+
+/**
  * Update an initiative's status
  */
 export async function updateInitiativeStatus(
@@ -236,33 +271,19 @@ export async function updateInitiativeStatus(
   newStatus: InitiativeStatusValue,
   updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
-  const initiative = await getInitiative(env, idOrName);
-  if (!initiative) {
-    return { success: false, message: `Initiative "${idOrName}" not found.` };
-  }
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (initiative, now) => {
+      initiative.status = { value: newStatus, updatedAt: now, updatedBy };
+    },
+    true // updateIndex - status appears in index
+  );
 
-  const now = new Date().toISOString();
-  initiative.status = {
-    value: newStatus,
-    updatedAt: now,
-    updatedBy,
-  };
-  initiative.updatedAt = now;
-
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
-
-  // Update index
-  const index = await getIndex(env);
-  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
-  if (metaIndex >= 0) {
-    index.initiatives[metaIndex] = toMetadata(initiative);
-    await saveIndex(env, index);
-  }
-
+  if (!result.success) return result;
   return {
     success: true,
-    message: `Updated "${initiative.name}" status to *${newStatus}*.`,
+    message: `Updated "${result.initiative!.name}" status to *${newStatus}*.`,
   };
 }
 
@@ -273,31 +294,21 @@ export async function updateInitiativePrd(
   env: Env,
   idOrName: string,
   prdLink: string,
-  updatedBy: string
+  _updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
-  const initiative = await getInitiative(env, idOrName);
-  if (!initiative) {
-    return { success: false, message: `Initiative "${idOrName}" not found.` };
-  }
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (initiative) => {
+      initiative.prdLink = prdLink;
+    },
+    true // updateIndex - hasPrd appears in index
+  );
 
-  const now = new Date().toISOString();
-  initiative.prdLink = prdLink;
-  initiative.updatedAt = now;
-
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
-
-  // Update index (hasPrd changed)
-  const index = await getIndex(env);
-  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
-  if (metaIndex >= 0) {
-    index.initiatives[metaIndex] = toMetadata(initiative);
-    await saveIndex(env, index);
-  }
-
+  if (!result.success) return result;
   return {
     success: true,
-    message: `Added PRD link to "${initiative.name}".`,
+    message: `Added PRD link to "${result.initiative!.name}".`,
   };
 }
 
@@ -308,29 +319,25 @@ export async function updateInitiativeName(
   env: Env,
   idOrName: string,
   newName: string,
-  updatedBy: string
+  _updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
+  // Need to capture old name before update
   const initiative = await getInitiative(env, idOrName);
   if (!initiative) {
     return { success: false, message: `Initiative "${idOrName}" not found.` };
   }
-
   const oldName = initiative.name;
-  const now = new Date().toISOString();
-  initiative.name = newName;
-  initiative.updatedAt = now;
 
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (init) => {
+      init.name = newName;
+    },
+    true // updateIndex - name appears in index
+  );
 
-  // Update index
-  const index = await getIndex(env);
-  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
-  if (metaIndex >= 0) {
-    index.initiatives[metaIndex] = toMetadata(initiative);
-    await saveIndex(env, index);
-  }
-
+  if (!result.success) return result;
   return {
     success: true,
     message: `Renamed "${oldName}" to "${newName}".`,
@@ -344,23 +351,21 @@ export async function updateInitiativeDescription(
   env: Env,
   idOrName: string,
   newDescription: string,
-  updatedBy: string
+  _updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
-  const initiative = await getInitiative(env, idOrName);
-  if (!initiative) {
-    return { success: false, message: `Initiative "${idOrName}" not found.` };
-  }
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (initiative) => {
+      initiative.description = newDescription;
+    },
+    false // description not in index
+  );
 
-  const now = new Date().toISOString();
-  initiative.description = newDescription;
-  initiative.updatedAt = now;
-
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
-
+  if (!result.success) return result;
   return {
     success: true,
-    message: `Updated description for "${initiative.name}".`,
+    message: `Updated description for "${result.initiative!.name}".`,
   };
 }
 
@@ -371,31 +376,21 @@ export async function updateInitiativeOwner(
   env: Env,
   idOrName: string,
   newOwner: string,
-  updatedBy: string
+  _updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
-  const initiative = await getInitiative(env, idOrName);
-  if (!initiative) {
-    return { success: false, message: `Initiative "${idOrName}" not found.` };
-  }
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (initiative) => {
+      initiative.owner = newOwner;
+    },
+    true // updateIndex - owner appears in index
+  );
 
-  const now = new Date().toISOString();
-  initiative.owner = newOwner;
-  initiative.updatedAt = now;
-
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
-
-  // Update index (owner changed)
-  const index = await getIndex(env);
-  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
-  if (metaIndex >= 0) {
-    index.initiatives[metaIndex] = toMetadata(initiative);
-    await saveIndex(env, index);
-  }
-
+  if (!result.success) return result;
   return {
     success: true,
-    message: `Updated owner of "${initiative.name}" to <@${newOwner}>.`,
+    message: `Updated owner of "${result.initiative!.name}" to <@${newOwner}>.`,
   };
 }
 
@@ -406,32 +401,22 @@ export async function addInitiativeMetric(
   env: Env,
   idOrName: string,
   metric: ExpectedMetric,
-  updatedBy: string
+  _updatedBy: string
 ): Promise<{ success: boolean; message: string }> {
-  const initiative = await getInitiative(env, idOrName);
-  if (!initiative) {
-    return { success: false, message: `Initiative "${idOrName}" not found.` };
-  }
+  const result = await updateInitiativeField(
+    env,
+    idOrName,
+    (initiative) => {
+      initiative.expectedMetrics.push(metric);
+    },
+    true // updateIndex - hasMetrics appears in index
+  );
 
-  const now = new Date().toISOString();
-  initiative.expectedMetrics.push(metric);
-  initiative.updatedAt = now;
-
-  // Save updated initiative
-  await env.DOCS_KV.put(idToKey(initiative.id), JSON.stringify(initiative));
-
-  // Update index (hasMetrics changed)
-  const index = await getIndex(env);
-  const metaIndex = index.initiatives.findIndex((i) => i.id === initiative.id);
-  if (metaIndex >= 0) {
-    index.initiatives[metaIndex] = toMetadata(initiative);
-    await saveIndex(env, index);
-  }
-
+  if (!result.success) return result;
   const typeLabel = metric.type === "gtm" ? "GTM" : "Product";
   return {
     success: true,
-    message: `Added ${typeLabel} metric to "${initiative.name}": ${metric.name} - ${metric.target}`,
+    message: `Added ${typeLabel} metric to "${result.initiative!.name}": ${metric.name} - ${metric.target}`,
   };
 }
 
@@ -491,8 +476,7 @@ export function formatInitiative(init: Initiative): string {
     lines.push(`\nStrategy: ${init.strategyDocRef}`);
   }
 
-  const created = new Date(init.createdAt).toLocaleDateString();
-  lines.push(`\n_Created ${created}_`);
+  lines.push(`\n_Created ${formatDate(init.createdAt)}_`);
 
   return lines.join("\n");
 }
@@ -507,7 +491,7 @@ export function formatInitiativeList(
   // Handle both paginated and raw array input
   const isPaginated = !Array.isArray(result);
   const initiatives = isPaginated ? result.items : result;
-  const paginationInfo = isPaginated ? result : null;
+  const paginationInfo: PaginationInfo | null = isPaginated ? result : null;
 
   if (initiatives.length === 0) {
     if (paginationInfo && paginationInfo.totalItems > 0) {
@@ -525,18 +509,11 @@ export function formatInitiativeList(
   }
 
   // Header with pagination info
-  const headerParts = ["*Initiatives*"];
-  if (paginationInfo) {
-    if (paginationInfo.totalPages > 1) {
-      headerParts.push(`(page ${paginationInfo.page}/${paginationInfo.totalPages}, ${paginationInfo.totalItems} total)`);
-    } else {
-      headerParts.push(`(${paginationInfo.totalItems} total)`);
-    }
-  } else {
-    headerParts.push(`(${initiatives.length} total)`);
-  }
+  const header = paginationInfo
+    ? `*Initiatives* ${formatPaginationHeader(paginationInfo, "total")}`
+    : `*Initiatives* (${initiatives.length} total)`;
 
-  const lines: string[] = [headerParts.join(" ")];
+  const lines: string[] = [header];
 
   const statusOrder: InitiativeStatusValue[] = [
     "active",
@@ -561,8 +538,11 @@ export function formatInitiativeList(
   }
 
   // Add pagination hint if there are more pages
-  if (paginationInfo?.hasMore) {
-    lines.push(`\n_Use \`initiatives --page ${paginationInfo.page + 1}\` for more_`);
+  if (paginationInfo) {
+    const hint = formatMorePagesHint(paginationInfo, "initiatives");
+    if (hint) {
+      lines.push(`\n${hint}`);
+    }
   }
 
   return lines.join("\n");
@@ -610,18 +590,14 @@ export async function searchInitiatives(
           score += 5;
           // Extract snippet around match
           const matchIndex = descLower.indexOf(queryLower);
-          const start = Math.max(0, matchIndex - 30);
-          const end = Math.min(init.description.length, matchIndex + queryLower.length + 50);
-          snippet = (start > 0 ? "..." : "") + init.description.slice(start, end) + (end < init.description.length ? "..." : "");
+          snippet = extractSnippet(init.description, matchIndex, queryLower.length, 30, 50);
         } else {
           for (const word of queryWords) {
             if (descLower.includes(word)) {
               score += 1;
               if (!snippet) {
                 const matchIndex = descLower.indexOf(word);
-                const start = Math.max(0, matchIndex - 30);
-                const end = Math.min(init.description.length, matchIndex + 60);
-                snippet = (start > 0 ? "..." : "") + init.description.slice(start, end) + (end < init.description.length ? "..." : "");
+                snippet = extractSnippet(init.description, matchIndex, word.length, 30, 50);
               }
             }
           }
