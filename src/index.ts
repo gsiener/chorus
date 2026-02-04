@@ -1106,15 +1106,19 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     }
 
     // Try natural language initiative commands before falling back to Claude
-    if (mightBeInitiativeCommand(cleanedText)) {
+    const isNlpCommand = mightBeInitiativeCommand(cleanedText);
+    console.log(`PDD-65 DEBUG: mightBeInitiativeCommand("${cleanedText.slice(0, 50)}...") = ${isNlpCommand}`);
+    if (isNlpCommand) {
       recordCommand("nlp:initiative");
       const nlpResult = await processNaturalLanguageCommand(cleanedText, user, env);
+      console.log(`PDD-65 DEBUG: nlpResult = ${nlpResult ? nlpResult.slice(0, 100) + "..." : "null"}`);
       if (nlpResult) {
         await postMessage(channel, nlpResult, threadTs, env);
         return;
       }
       // If NLP didn't handle it, fall through to regular Claude
     }
+    console.log("PDD-65 DEBUG: Falling through to Claude generateResponse()");
 
     // Regular message - route to Claude
     let messages;
