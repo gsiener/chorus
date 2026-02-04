@@ -142,6 +142,15 @@ After ANY correction from the user, capture the lesson:
 - Build institutional knowledge over time
 - Review existing solutions at session start for relevant patterns
 
+### 6. Self-Verification
+
+Never tell the user to try something when you can verify it yourself:
+
+- After deploying, check the GitHub Actions status and confirm success
+- After fixing a bug, test the fix via API or other available means
+- After making changes, run the tests yourself rather than asking the user to
+- Use available tools (curl, gh CLI, etc.) to validate your work before reporting done
+
 ## Project Overview
 
 Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using Claude for AI-powered responses. It maintains thread context for natural conversations and is focused on internal knowledge about product roadmap and strategy.
