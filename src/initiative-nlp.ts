@@ -258,43 +258,19 @@ interface ClaudeToolResponse {
  * Trigger NLP for: "mark Project X as active", "set status of X to completed"
  * Don't trigger for: "what are our initiatives?", "list all initiatives"
  */
-export function mightBeInitiativeCommand(text: string): boolean {
-  const cleanText = text.toLowerCase();
-
-  // Patterns that indicate READ-ONLY/QUERY intent - let Claude handle these
-  const queryPatterns = [
-    /\blist\s+(all\s+)?(the\s+)?initiatives?\b/,  // "list all initiatives", "list the initiatives"
-    /\bwhat\s+(are|is)\s+(our|the|my)\s+initiatives?\b/,  // "what are our initiatives"
-    /\bshow\s+(me\s+)?(the\s+)?initiatives\b/,  // "show me the initiatives"
-    /\btell\s+me\s+about\s+(the\s+)?initiatives\b/,  // "tell me about the initiatives"
-    /\bwhat\s+initiatives\b/,  // "what initiatives are we working on"
-    /\bcan\s+you\s+list\b.*\binitiatives?\b/,  // "can you list all the initiatives"
-  ];
-
-  // If it matches a query pattern, let Claude handle it
-  if (queryPatterns.some(pattern => pattern.test(cleanText))) {
-    return false;
-  }
-
-  // Patterns that suggest initiative MANAGEMENT intent (not just queries)
-  // These require a specific initiative name or action
-  const managementPatterns = [
-    /\bmark\s+\S+.*\s+as\s+(active|paused|completed|cancelled|proposed)\b/,  // "mark X as active"
-    /\bset\s+status\b/,
-    /\bchange\s+status\b/,
-    /\bassign\s+to\b/,
-    /\bowned\s+by\b/,
-    /\badd\s+metric\b/,
-    /\bupdate\s+status\b/,
-    /\brename\s+initiative\b/,
-    /\bremove\s+initiative\b/,
-    /\bdelete\s+initiative\b/,
-    /\bcreate\s+initiative\b/,
-    /\bwhat's\s+happening\s+with\b/,  // asking about a specific initiative
-    /\bstatus\s+of\b/,  // asking about a specific initiative's status
-  ];
-
-  return managementPatterns.some(pattern => pattern.test(cleanText));
+/**
+ * PDD-65 FIX: Temporarily disable NLP initiative commands entirely.
+ * All initiative queries now go to Claude, which uses R&D Priorities.
+ * The NLP tool path was incorrectly matching broad queries and returning
+ * 45 tracked initiatives instead of 12 R&D Priorities.
+ *
+ * TODO: Re-enable with proper query pattern matching once the root cause
+ * of why the query patterns weren't working in production is understood.
+ */
+export function mightBeInitiativeCommand(_text: string): boolean {
+  // DISABLED: Always return false to route all queries to Claude
+  // This ensures users get R&D Priorities (12) instead of tracked initiatives (45)
+  return false;
 }
 
 /**

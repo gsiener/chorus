@@ -66,17 +66,20 @@ describe("parseInitiativeCommand", () => {
 });
 
 describe("mightBeInitiativeCommand (PDD-65)", () => {
-  describe("should trigger NLP for explicit initiative management", () => {
-    it("triggers for 'mark Project X as active'", () => {
-      expect(mightBeInitiativeCommand("mark Project X as active")).toBe(true);
+  // NOTE: NLP initiative commands are DISABLED (always returns false)
+  // This ensures all initiative queries go to Claude, which uses R&D Priorities.
+  // See initiative-nlp.ts for details.
+  describe("always returns false (NLP disabled for PDD-65 fix)", () => {
+    it("returns false for 'mark Project X as active'", () => {
+      expect(mightBeInitiativeCommand("mark Project X as active")).toBe(false);
     });
 
-    it("triggers for 'set status of Project X to completed'", () => {
-      expect(mightBeInitiativeCommand("set status of Project X to completed")).toBe(true);
+    it("returns false for 'set status of Project X to completed'", () => {
+      expect(mightBeInitiativeCommand("set status of Project X to completed")).toBe(false);
     });
 
-    it("triggers for 'add metric to Project X'", () => {
-      expect(mightBeInitiativeCommand("add metric to Project X")).toBe(true);
+    it("returns false for 'add metric to Project X'", () => {
+      expect(mightBeInitiativeCommand("add metric to Project X")).toBe(false);
     });
   });
 

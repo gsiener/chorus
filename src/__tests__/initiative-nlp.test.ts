@@ -32,13 +32,17 @@ function createMockEnv(kv = createMockKV()): Env {
 }
 
 describe("mightBeInitiativeCommand", () => {
-  it("returns true for management commands (PDD-65)", () => {
-    expect(mightBeInitiativeCommand("mark the mobile app as active")).toBe(true);
-    expect(mightBeInitiativeCommand("change status of dashboard to completed")).toBe(true);
-    expect(mightBeInitiativeCommand("what's happening with the API redesign")).toBe(true);
-    expect(mightBeInitiativeCommand("set status of Project X to paused")).toBe(true);
-    expect(mightBeInitiativeCommand("add metric to Dashboard")).toBe(true);
-    expect(mightBeInitiativeCommand("assign to @user")).toBe(true);
+  // NOTE: NLP initiative commands are DISABLED (always returns false)
+  // This ensures all initiative queries go to Claude, which uses R&D Priorities.
+  // See initiative-nlp.ts for details.
+
+  it("always returns false (NLP disabled for PDD-65)", () => {
+    // Management commands now return false too
+    expect(mightBeInitiativeCommand("mark the mobile app as active")).toBe(false);
+    expect(mightBeInitiativeCommand("change status of dashboard to completed")).toBe(false);
+    expect(mightBeInitiativeCommand("set status of Project X to paused")).toBe(false);
+    expect(mightBeInitiativeCommand("add metric to Dashboard")).toBe(false);
+    expect(mightBeInitiativeCommand("assign to @user")).toBe(false);
   });
 
   it("returns false for general questions about initiatives (PDD-65)", () => {
@@ -54,11 +58,6 @@ describe("mightBeInitiativeCommand", () => {
     expect(mightBeInitiativeCommand("what time is it")).toBe(false);
     expect(mightBeInitiativeCommand("hello there")).toBe(false);
     expect(mightBeInitiativeCommand("tell me a joke")).toBe(false);
-  });
-
-  it("is case insensitive", () => {
-    expect(mightBeInitiativeCommand("MARK MY PROJECT AS ACTIVE")).toBe(true);
-    expect(mightBeInitiativeCommand("SET STATUS to completed")).toBe(true);
   });
 });
 
