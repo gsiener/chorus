@@ -11,6 +11,12 @@ export interface Env {
   AI: Ai;
 }
 
+// Shared pagination options for list operations
+export interface PaginationOptions {
+  page?: number;
+  pageSize?: number;
+}
+
 export interface SlackUrlVerification {
   type: "url_verification";
   challenge: string;

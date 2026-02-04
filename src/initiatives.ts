@@ -14,6 +14,7 @@ import type {
   InitiativeStatus,
   InitiativeStatusValue,
   ExpectedMetric,
+  PaginationOptions,
 } from "./types";
 
 // Limits
@@ -65,11 +66,6 @@ function toMetadata(init: Initiative): InitiativeMetadata {
 
 // Default page size for listings
 const DEFAULT_PAGE_SIZE = 10;
-
-export interface PaginationOptions {
-  page?: number;        // 1-indexed page number
-  pageSize?: number;    // Items per page
-}
 
 export interface PaginatedResult<T> {
   items: T[];

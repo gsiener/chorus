@@ -2,7 +2,7 @@
  * Document management for Chorus knowledge base
  */
 
-import type { Env } from "./types";
+import type { Env, PaginationOptions } from "./types";
 import { indexDocument, removeDocumentFromIndex } from "./embeddings";
 import {
   MAX_DOC_SIZE,
@@ -305,14 +305,9 @@ export async function removeDocument(
   return { success: true, message: `Removed "${removed.title}" from the knowledge base.` };
 }
 
-export interface DocPaginationOptions {
-  page?: number;
-  pageSize?: number;
-}
-
 export async function listDocuments(
   env: Env,
-  pagination?: DocPaginationOptions
+  pagination?: PaginationOptions
 ): Promise<string> {
   const index = await getIndex(env);
 

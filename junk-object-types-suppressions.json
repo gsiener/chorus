@@ -11,6 +11,15 @@
     },
     "inline:92:11": {
       "reason": "property 'usage'"
+    },
+    "inline:58:9": {
+      "reason": "property 'item'"
+    },
+    "inline:96:18": {
+      "reason": "generic argument"
+    },
+    "inline:98:11": {
+      "reason": "property 'usage'"
     }
   },
   "src/embeddings.ts": {
@@ -45,6 +54,12 @@
     },
     "inline:407:12": {
       "reason": "generic argument"
+    },
+    "inline:376:12": {
+      "reason": "generic argument"
+    },
+    "inline:402:12": {
+      "reason": "generic argument"
     }
   },
   "src/initiatives.ts": {
@@ -76,6 +91,33 @@
       "reason": "generic argument"
     },
     "inline:448:12": {
+      "reason": "generic argument"
+    },
+    "inline:85:13": {
+      "reason": "parameter 'filters'"
+    },
+    "inline:155:12": {
+      "reason": "generic argument"
+    },
+    "inline:238:12": {
+      "reason": "generic argument"
+    },
+    "inline:277:12": {
+      "reason": "generic argument"
+    },
+    "inline:312:12": {
+      "reason": "generic argument"
+    },
+    "inline:348:12": {
+      "reason": "generic argument"
+    },
+    "inline:375:12": {
+      "reason": "generic argument"
+    },
+    "inline:410:12": {
+      "reason": "generic argument"
+    },
+    "inline:444:12": {
       "reason": "generic argument"
     }
   },
