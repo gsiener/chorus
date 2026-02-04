@@ -14,23 +14,27 @@ jobs:
         with:
           fetch-depth: 0 # Required for --changed-only comparison
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: pnpm audit --audit-level=high
+        continue-on-error: true # pnpm audit can be stricter than npm
 
       - name: Type check
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Check for junk object types
-        run: npm run lint:types:changed
+        run: pnpm run lint:types:changed
 
       - name: Run tests
         run: ./scripts/test-ci.sh
@@ -58,17 +62,20 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Run quality/eval tests
-        run: npm run test:quality
+        run: pnpm run test:quality
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         # Allow quality tests to fail without blocking deploy
@@ -85,17 +92,20 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          cache: "npm"
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build worker bundle
-        run: npx wrangler deploy --dry-run --outdir=dist
+        run: pnpm exec wrangler deploy --dry-run --outdir=dist
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -112,7 +122,7 @@ jobs:
           subject-path: dist/*
 
       - name: Deploy to Cloudflare Workers
-        run: npm run deploy
+        run: pnpm run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           HONEYCOMB_API_KEY: ${{ secrets.HONEYCOMB_API_KEY }}

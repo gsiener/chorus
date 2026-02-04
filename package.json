@@ -2,6 +2,7 @@
   "name": "chorus",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.28.2",
   "engines": {
     "node": ">=22.0.0"
   },
@@ -11,12 +12,15 @@
     "typecheck": "tsc --noEmit",
     "lint:types": "forbid-junk-object-types",
     "lint:types:changed": "forbid-junk-object-types --changed-only",
-    "test": "npm run test:unit && npm run test:integration",
+    "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.unit.config.ts",
     "test:watch:integration": "vitest --config vitest.config.ts",
     "test:quality": "vitest run --config vitest.quality.config.ts"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd"]
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.5",

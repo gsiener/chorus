@@ -3,7 +3,7 @@
 # The tests pass but workerd crashes during cleanup - we detect success and exit 0
 
 # Run tests and capture output
-OUTPUT=$(npm test 2>&1) || true
+OUTPUT=$(pnpm test 2>&1) || true
 
 echo "$OUTPUT"
 
