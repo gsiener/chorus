@@ -60,6 +60,21 @@
     },
     "inline:402:12": {
       "reason": "generic argument"
+    },
+    "inline:154:12": {
+      "reason": "generic argument"
+    },
+    "inline:222:12": {
+      "reason": "generic argument"
+    },
+    "inline:287:12": {
+      "reason": "generic argument"
+    },
+    "inline:374:12": {
+      "reason": "generic argument"
+    },
+    "inline:400:12": {
+      "reason": "generic argument"
     }
   },
   "src/initiatives.ts": {
@@ -118,6 +133,36 @@
       "reason": "generic argument"
     },
     "inline:444:12": {
+      "reason": "generic argument"
+    },
+    "inline:93:13": {
+      "reason": "parameter 'filters'"
+    },
+    "inline:157:12": {
+      "reason": "generic argument"
+    },
+    "inline:241:12": {
+      "reason": "generic argument"
+    },
+    "inline:273:12": {
+      "reason": "generic argument"
+    },
+    "inline:298:12": {
+      "reason": "generic argument"
+    },
+    "inline:323:12": {
+      "reason": "generic argument"
+    },
+    "inline:355:12": {
+      "reason": "generic argument"
+    },
+    "inline:380:12": {
+      "reason": "generic argument"
+    },
+    "inline:405:12": {
+      "reason": "generic argument"
+    },
+    "inline:429:12": {
       "reason": "generic argument"
     }
   },
@@ -372,6 +417,24 @@
     },
     "inline:1267:43": {
       "reason": "type assertion"
+    }
+  },
+  "src/primitives/indexed-store.ts": {
+    "IndexedStoreConfig": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "IndexedStore": {
+      "reason": "Auto-suppressed - add explanation here"
+    }
+  },
+  "src/primitives/validators.ts": {
+    "inline:270:38": {
+      "reason": "generic argument"
+    }
+  },
+  "src/primitives/formatters.ts": {
+    "inline:21:4": {
+      "reason": "return type"
     }
   }
 }
