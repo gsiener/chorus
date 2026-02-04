@@ -228,3 +228,27 @@ curl -s "$CHORUS_URL/api/ask" \
 - Use `initiativeToProjectCreate/Delete` to link/unlink projects
 
 The priorities cache refreshes every 5 minutes.
+
+## Task Tracking Preference
+
+**Use Linear sub-issues instead of CLI tasks.** When working on a parent Linear issue:
+
+1. Query existing sub-issues first to avoid duplicates
+2. Create sub-issues for each discrete step
+3. Update sub-issue states as work progresses (In Progress → Done)
+4. Keep the parent issue as the rollup
+
+This keeps work visible to the team and persists beyond the session.
+
+Example workflow:
+```bash
+# Query sub-issues of parent
+curl -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API" \
+  -d '{"query": "{ issue(id: \"PARENT_UUID\") { children { nodes { identifier title state { name } } } } }"}'
+
+# Create sub-issue
+curl -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API" \
+  -d '{"query": "mutation { issueCreate(input: { title: \"Step description\", teamId: \"TEAM_ID\", parentId: \"PARENT_UUID\" }) { success } }"}'
+```
