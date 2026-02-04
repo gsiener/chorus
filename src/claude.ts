@@ -22,7 +22,9 @@ import {
 import SYSTEM_PROMPT from "./soul.md";
 
 // Cache configuration
-const CACHE_PREFIX = "cache:response:";
+// Version bumped to invalidate old caches after context changes (PDD-65)
+const CACHE_VERSION = "v2";
+const CACHE_PREFIX = `cache:response:${CACHE_VERSION}:`;
 const CACHE_TTL_SECONDS = 3600; // 1 hour
 
 /**
