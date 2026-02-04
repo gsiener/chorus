@@ -54,6 +54,11 @@ chorus/
 │   ├── telemetry.ts       # OpenTelemetry instrumentation
 │   ├── http-utils.ts      # HTTP retry/error handling
 │   ├── soul.md            # System prompt (AI personality)
+│   ├── primitives/        # Shared utilities and patterns
+│   │   ├── index.ts       # Barrel exports
+│   │   ├── validators.ts  # Error classes, ValidationResult type
+│   │   ├── indexed-store.ts # Generic indexed KV store pattern
+│   │   └── formatters.ts  # Pagination, date, text utilities
 │   └── __tests__/         # Test files
 ├── wrangler.toml          # Cloudflare Worker config
 ├── package.json
@@ -471,6 +476,69 @@ interface Initiative {
 | `conversation.*` | Turn count, context length |
 | `knowledge_base.*` | Doc count, retrieval latency |
 | `error.*` | Category, retryability |
+
+---
+
+### primitives/ - Shared Utilities
+
+**Purpose:** Reusable building blocks that eliminate code duplication across modules.
+
+**Modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `validators.ts` | Error classes with `_tag` discriminator, `ValidationResult<T>` type, validation functions |
+| `indexed-store.ts` | Generic indexed KV store pattern (index + prefixed items) |
+| `formatters.ts` | Pagination calculation, date formatting, text truncation, snippet extraction |
+
+**Key Patterns:**
+
+**1. Discriminated Error Union:**
+```typescript
+export class EmptyValueError extends Error {
+  readonly _tag = "EmptyValueError" as const;
+  constructor(public readonly fieldName: string) {
+    super(`${fieldName} cannot be empty`);
+  }
+}
+
+// Type-safe result handling
+export type ValidationResult<T, E extends Error = Error> =
+  | { success: true; value: T }
+  | { success: false; error: E };
+```
+
+**2. Generic Indexed Store:**
+```typescript
+// Abstraction for the index + prefixed items KV pattern
+const store = createIndexedStore<DocsIndex, Document, DocMetadata>({
+  indexKey: "docs:index",
+  itemPrefix: "docs:content:",
+  itemIdToKey: (id) => `docs:content:${id}`,
+  getItemId: (doc) => sanitizeTitle(doc.title),
+  // ...
+});
+
+// Provides: getIndex, saveIndex, getItem, saveItem,
+//           findInIndex, upsertIndexEntry, removeFromIndex
+```
+
+**3. Pagination Utilities:**
+```typescript
+const { paginatedItems, pagination } = calculatePagination(
+  items, page, pageSize, maxPageSize
+);
+const header = formatPaginationHeader(pagination, "docs");
+const hint = formatMorePagesHint(pagination, "docs");
+```
+
+**Usage:** Import from `./primitives`:
+```typescript
+import {
+  calculatePagination, formatDate,
+  ValidationResult, ok, err
+} from "./primitives";
+```
 
 ---
 
