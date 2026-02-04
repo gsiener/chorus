@@ -9,6 +9,8 @@
     "dev": "wrangler dev",
     "deploy": "./scripts/deploy.sh",
     "typecheck": "tsc --noEmit",
+    "lint:types": "forbid-junk-object-types",
+    "lint:types:changed": "forbid-junk-object-types --changed-only",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.config.ts",
@@ -20,6 +22,7 @@
     "@cloudflare/vitest-pool-workers": "^0.12.5",
     "@cloudflare/workers-types": "^4.20260120.0",
     "@types/node": "^22.15.0",
+    "forbid-junk-object-types": "^1.0.0",
     "typescript": "^5.7.2",
     "vitest": "3.2.x",
     "wrangler": "^4.59.3"

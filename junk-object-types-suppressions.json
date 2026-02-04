@@ -1,0 +1,335 @@
+{
+  "src/types.ts": {
+    "InitiativeStatus": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:52:9": {
+      "reason": "property 'item'"
+    },
+    "inline:90:18": {
+      "reason": "generic argument"
+    },
+    "inline:92:11": {
+      "reason": "property 'usage'"
+    }
+  },
+  "src/embeddings.ts": {
+    "DocumentChunk": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:157:12": {
+      "reason": "generic argument"
+    },
+    "inline:207:12": {
+      "reason": "generic argument"
+    }
+  },
+  "src/docs.ts": {
+    "DocMetadata": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "DocPaginationOptions": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:148:12": {
+      "reason": "generic argument"
+    },
+    "inline:216:12": {
+      "reason": "generic argument"
+    },
+    "inline:281:12": {
+      "reason": "generic argument"
+    },
+    "inline:381:12": {
+      "reason": "generic argument"
+    },
+    "inline:407:12": {
+      "reason": "generic argument"
+    }
+  },
+  "src/initiatives.ts": {
+    "PaginationOptions": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:89:13": {
+      "reason": "parameter 'filters'"
+    },
+    "inline:159:12": {
+      "reason": "generic argument"
+    },
+    "inline:242:12": {
+      "reason": "generic argument"
+    },
+    "inline:281:12": {
+      "reason": "generic argument"
+    },
+    "inline:316:12": {
+      "reason": "generic argument"
+    },
+    "inline:352:12": {
+      "reason": "generic argument"
+    },
+    "inline:379:12": {
+      "reason": "generic argument"
+    },
+    "inline:414:12": {
+      "reason": "generic argument"
+    },
+    "inline:448:12": {
+      "reason": "generic argument"
+    }
+  },
+  "src/http-utils.ts": {
+    "RetryOptions": {
+      "reason": "Auto-suppressed - add explanation here"
+    }
+  },
+  "src/claude.ts": {
+    "ThreadInfo": {
+      "reason": "Auto-suppressed - add explanation here"
+    }
+  },
+  "src/files.ts": {
+    "ExtractedFile": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:132:43": {
+      "reason": "type assertion"
+    }
+  },
+  "src/parseCommands.ts": {
+    "SearchCommand": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "CheckInCommand": {
+      "reason": "Auto-suppressed - add explanation here"
+    },
+    "inline:29:31": {
+      "reason": "property 'filters'"
+    },
+    "inline:126:20": {
+      "reason": "variable 'filters'"
+    }
+  },
+  "src/__tests__/helpers.ts": {
+    "inline:26:56": {
+      "reason": "parameter '_options'"
+    },
+    "inline:89:12": {
+      "reason": "parameter 'options'"
+    },
+    "inline:151:12": {
+      "reason": "parameter 'options'"
+    },
+    "inline:181:10": {
+      "reason": "parameter 'usage'"
+    },
+    "inline:219:52": {
+      "reason": "parameter 'overrides'"
+    }
+  },
+  "src/slack.ts": {
+    "inline:226:13": {
+      "reason": "property 'channel'"
+    },
+    "inline:233:12": {
+      "reason": "generic argument"
+    },
+    "inline:284:10": {
+      "reason": "property 'user'"
+    },
+    "inline:288:15": {
+      "reason": "property 'profile'"
+    }
+  },
+  "src/brief-checker.ts": {
+    "inline:34:10": {
+      "reason": "property 'links'"
+    },
+    "inline:39:24": {
+      "reason": "generic argument"
+    },
+    "inline:40:17": {
+      "reason": "property 'initiative'"
+    },
+    "inline:41:12": {
+      "reason": "property 'owner'"
+    },
+    "inline:50:15": {
+      "reason": "property 'initiative'"
+    },
+    "inline:55:10": {
+      "reason": "property 'data'"
+    },
+    "inline:56:27": {
+      "reason": "property 'initiativeRelations'"
+    },
+    "inline:60:18": {
+      "reason": "generic argument"
+    }
+  },
+  "src/checkins.ts": {
+    "inline:52:42": {
+      "reason": "type assertion"
+    },
+    "inline:239:69": {
+      "reason": "generic argument"
+    },
+    "inline:343:12": {
+      "reason": "generic argument"
+    }
+  },
+  "src/linear-priorities.ts": {
+    "inline:30:13": {
+      "reason": "property 'projects'"
+    },
+    "inline:31:18": {
+      "reason": "generic argument"
+    },
+    "inline:33:15": {
+      "reason": "property 'status'"
+    },
+    "inline:45:10": {
+      "reason": "property 'data'"
+    },
+    "inline:46:27": {
+      "reason": "property 'initiativeRelations'"
+    },
+    "inline:47:20": {
+      "reason": "generic argument"
+    },
+    "inline:49:21": {
+      "reason": "property 'initiative'"
+    },
+    "inline:54:18": {
+      "reason": "generic argument"
+    },
+    "inline:60:65": {
+      "reason": "return type"
+    }
+  },
+  "src/telemetry.ts": {
+    "inline:102:45": {
+      "reason": "parameter 'metrics'"
+    },
+    "inline:230:50": {
+      "reason": "parameter 'metrics'"
+    },
+    "inline:265:40": {
+      "reason": "parameter 'data'"
+    },
+    "inline:267:19": {
+      "reason": "generic argument"
+    },
+    "inline:277:19": {
+      "reason": "generic argument"
+    },
+    "inline:306:43": {
+      "reason": "parameter 'data'"
+    },
+    "inline:308:19": {
+      "reason": "generic argument"
+    },
+    "inline:329:46": {
+      "reason": "parameter 'metrics'"
+    },
+    "inline:362:47": {
+      "reason": "parameter 'operation'"
+    },
+    "inline:391:45": {
+      "reason": "parameter 'metrics'"
+    },
+    "inline:417:54": {
+      "reason": "parameter 'operation'"
+    },
+    "inline:475:47": {
+      "reason": "parameter 'context'"
+    },
+    "inline:511:46": {
+      "reason": "parameter 'context'"
+    },
+    "inline:529:46": {
+      "reason": "parameter 'context'"
+    },
+    "inline:558:47": {
+      "reason": "parameter 'context'"
+    },
+    "inline:600:47": {
+      "reason": "parameter 'context'"
+    },
+    "inline:629:42": {
+      "reason": "parameter 'context'"
+    },
+    "inline:659:15": {
+      "reason": "parameter 'attributes'"
+    },
+    "inline:725:38": {
+      "reason": "generic argument"
+    },
+    "inline:770:45": {
+      "reason": "parameter 'latency'"
+    },
+    "inline:787:45": {
+      "reason": "parameter 'latency'"
+    },
+    "inline:813:52": {
+      "reason": "parameter 'context'"
+    },
+    "inline:835:53": {
+      "reason": "parameter 'metrics'"
+    },
+    "inline:875:48": {
+      "reason": "return type"
+    }
+  },
+  "src/thread-context.ts": {
+    "inline:111:4": {
+      "reason": "return type"
+    }
+  },
+  "src/linear.ts": {
+    "inline:31:10": {
+      "reason": "property 'data'"
+    },
+    "inline:32:15": {
+      "reason": "property 'projects'"
+    },
+    "inline:36:18": {
+      "reason": "generic argument"
+    },
+    "inline:140:12": {
+      "reason": "generic argument"
+    },
+    "inline:146:9": {
+      "reason": "parameter 'i'"
+    },
+    "inline:202:12": {
+      "reason": "generic argument"
+    }
+  },
+  "src/initiative-nlp.ts": {
+    "inline:247:10": {
+      "reason": "property 'usage'"
+    },
+    "inline:287:22": {
+      "reason": "variable 'filters'"
+    }
+  },
+  "src/index.ts": {
+    "inline:341:13": {
+      "reason": "variable 'body'"
+    },
+    "inline:488:15": {
+      "reason": "variable 'body'"
+    },
+    "inline:514:15": {
+      "reason": "variable 'body'"
+    },
+    "inline:574:20": {
+      "reason": "variable 'filters'"
+    },
+    "inline:1267:43": {
+      "reason": "type assertion"
+    }
+  }
+}
