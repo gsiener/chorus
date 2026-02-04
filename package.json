@@ -19,7 +19,7 @@
     "test:quality": "vitest run --config vitest.quality.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/vitest-pool-workers": "^0.12.9",
     "@cloudflare/workers-types": "^4.20260120.0",
     "@types/node": "^22.15.0",
     "forbid-junk-object-types": "^1.0.0",
