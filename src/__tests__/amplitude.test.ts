@@ -243,20 +243,20 @@ describe("Amplitude Integration", () => {
       expect(result).toContain("▓");
     });
 
-    it("uses flat arrow for small changes", () => {
+    it("uses white circle for steady metrics", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      // DAU/MAU has 0.3% change -> should use → arrow and minus emoji
+      // DAU/MAU has 0.3% change -> should use white circle
       expect(result).toContain("*DAU/MAU (Enterprise):* 31.2%");
       expect(result).toContain("→ 0.3% WoW");
-      expect(result).toContain(":heavy_minus_sign:");
+      expect(result).toContain(":white_circle:");
     });
 
-    it("uses rocket emoji for large gains", () => {
+    it("uses green circle for positive and red for negative trends", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      // Canvas & MCP Users has 18.6% change -> should use rocket
-      expect(result).toContain(":rocket:");
+      // Canvas & MCP Users has 18.6% -> green
+      expect(result).toContain(":large_green_circle:");
     });
 
     it("groups metrics by category with emojis", () => {

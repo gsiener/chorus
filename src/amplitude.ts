@@ -688,11 +688,9 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
 // --- Formatters ---
 
 function trendEmoji(changePercent: number): string {
-  if (changePercent >= 10) return ":rocket:";
-  if (changePercent > 1) return ":small_red_triangle:";
-  if (changePercent < -5) return ":small_red_triangle_down:";
-  if (changePercent < -1) return ":small_red_triangle_down:";
-  return ":heavy_minus_sign:";
+  if (changePercent > 1) return ":large_green_circle:";
+  if (changePercent < -1) return ":red_circle:";
+  return ":white_circle:";
 }
 
 function trendArrow(changePercent: number): string {
