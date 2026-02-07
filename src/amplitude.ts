@@ -28,6 +28,7 @@ export interface AmplitudeMetric {
   previousValue: number;
   changePercent: number;
   unit: string;
+  chartUrl?: string;
 }
 
 export interface GrowingAccount {
@@ -687,12 +688,6 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
 
 // --- Formatters ---
 
-function trendEmoji(changePercent: number): string {
-  if (changePercent > 1) return ":large_green_circle:";
-  if (changePercent < -1) return ":red_circle:";
-  return ":white_circle:";
-}
-
 function trendArrow(changePercent: number): string {
   if (changePercent > 1) return "↑";
   if (changePercent < -1) return "↓";
@@ -700,13 +695,19 @@ function trendArrow(changePercent: number): string {
 }
 
 /**
- * Build a spark bar showing relative magnitude (1-8 blocks)
+ * Build a colored spark bar using emoji squares.
+ * Color reflects trend direction: green (up), red (down), white (steady).
  */
-function sparkBar(current: number, previous: number): string {
-  if (previous === 0) return "▓▓▓▓▓▓▓▓";
-  const ratio = Math.min(current / previous, 2);
-  const blocks = Math.max(1, Math.round(ratio * 4));
-  return "▓".repeat(blocks) + "░".repeat(Math.max(0, 8 - blocks));
+function sparkBar(current: number, previous: number, changePercent: number): string {
+  const ratio = previous === 0 ? 2 : Math.min(current / previous, 2);
+  const blocks = Math.max(1, Math.min(5, Math.round(ratio * 2.5)));
+
+  let filled: string;
+  if (changePercent > 1) filled = ":large_green_square:";
+  else if (changePercent < -1) filled = ":large_red_square:";
+  else filled = ":white_large_square:";
+
+  return filled.repeat(blocks);
 }
 
 function formatValue(value: number, unit: string): string {
@@ -745,11 +746,10 @@ export function formatMetricsForSlack(data: AmplitudeMetrics): string {
     const emoji = CATEGORY_EMOJI[category] ?? ":chart_with_upwards_trend:";
     lines.push(`${emoji} *${category}*`);
     for (const m of metrics) {
-      const trend = trendEmoji(m.changePercent);
       const absChange = Math.abs(m.changePercent);
-      const bar = sparkBar(m.currentValue, m.previousValue);
+      const bar = sparkBar(m.currentValue, m.previousValue, m.changePercent);
       lines.push(
-        `    ${trend}  *${m.name}:* ${formatValue(m.currentValue, m.unit)}  \`${bar}\`  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
+        `    *${m.name}:* ${formatValue(m.currentValue, m.unit)}  ${bar}  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
       );
     }
     lines.push("");
