@@ -232,35 +232,46 @@ describe("Amplitude Integration", () => {
       weekEnd: "20260201",
     };
 
-    it("formats metrics with trend arrows", () => {
+    it("formats metrics with trend emojis and spark bars", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      expect(result).toContain(":chart_with_upwards_trend:");
+      expect(result).toContain(":bar_chart:");
       expect(result).toContain("*Weekly Product Metrics*");
-      expect(result).toContain("Monthly Active Teams: 487");
+      expect(result).toContain("*Monthly Active Teams:* 487");
       expect(result).toContain("↑ 3.2% WoW");
+      // Spark bars present
+      expect(result).toContain("▓");
     });
 
     it("uses flat arrow for small changes", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      // DAU/MAU has 0.3% change -> should use → arrow
-      expect(result).toContain("DAU/MAU (Enterprise): 31.2%");
+      // DAU/MAU has 0.3% change -> should use → arrow and minus emoji
+      expect(result).toContain("*DAU/MAU (Enterprise):* 31.2%");
       expect(result).toContain("→ 0.3% WoW");
+      expect(result).toContain(":heavy_minus_sign:");
     });
 
-    it("groups metrics by category", () => {
+    it("uses rocket emoji for large gains", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      expect(result).toContain("*Engagement*");
-      expect(result).toContain("*Feature Adoption*");
+      // Canvas & MCP Users has 18.6% change -> should use rocket
+      expect(result).toContain(":rocket:");
     });
 
-    it("includes growing accounts section", () => {
+    it("groups metrics by category with emojis", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      expect(result).toContain("*Top Growing Accounts*");
-      expect(result).toContain("nubank");
+      expect(result).toContain(":busts_in_silhouette: *Engagement*");
+      expect(result).toContain(":sparkles: *Feature Adoption*");
+    });
+
+    it("includes growing accounts with medals", () => {
+      const result = formatMetricsForSlack(sampleData);
+
+      expect(result).toContain(":fire: *Top Growing Accounts*");
+      expect(result).toContain(":first_place_medal:");
+      expect(result).toContain("*nubank*");
       expect(result).toContain("+26.8%");
       expect(result).toContain("142 → 180 users");
     });

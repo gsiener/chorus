@@ -687,10 +687,28 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
 
 // --- Formatters ---
 
+function trendEmoji(changePercent: number): string {
+  if (changePercent >= 10) return ":rocket:";
+  if (changePercent > 1) return ":small_red_triangle:";
+  if (changePercent < -5) return ":small_red_triangle_down:";
+  if (changePercent < -1) return ":small_red_triangle_down:";
+  return ":heavy_minus_sign:";
+}
+
 function trendArrow(changePercent: number): string {
   if (changePercent > 1) return "↑";
   if (changePercent < -1) return "↓";
   return "→";
+}
+
+/**
+ * Build a spark bar showing relative magnitude (1-8 blocks)
+ */
+function sparkBar(current: number, previous: number): string {
+  if (previous === 0) return "▓▓▓▓▓▓▓▓";
+  const ratio = Math.min(current / previous, 2);
+  const blocks = Math.max(1, Math.round(ratio * 4));
+  return "▓".repeat(blocks) + "░".repeat(Math.max(0, 8 - blocks));
 }
 
 function formatValue(value: number, unit: string): string {
@@ -699,13 +717,21 @@ function formatValue(value: number, unit: string): string {
   return String(Math.round(value));
 }
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  Engagement: ":busts_in_silhouette:",
+  "Activation & Retention": ":seedling:",
+  "Feature Adoption": ":sparkles:",
+};
+
+const RANK_EMOJI = [":first_place_medal:", ":second_place_medal:", ":third_place_medal:", "4.", "5."];
+
 /**
  * Format metrics for Slack weekly report (mrkdwn)
  */
 export function formatMetricsForSlack(data: AmplitudeMetrics): string {
   const weekRange = `${formatDateRange(data.weekStart)} – ${formatDateRange(data.weekEnd)}`;
   const lines: string[] = [
-    `:chart_with_upwards_trend: *Weekly Product Metrics* (${weekRange})`,
+    `:bar_chart: *Weekly Product Metrics* (${weekRange})`,
     "",
   ];
 
@@ -718,12 +744,14 @@ export function formatMetricsForSlack(data: AmplitudeMetrics): string {
   }
 
   for (const [category, metrics] of categories) {
-    lines.push(`*${category}*`);
+    const emoji = CATEGORY_EMOJI[category] ?? ":chart_with_upwards_trend:";
+    lines.push(`${emoji} *${category}*`);
     for (const m of metrics) {
-      const arrow = trendArrow(m.changePercent);
+      const trend = trendEmoji(m.changePercent);
       const absChange = Math.abs(m.changePercent);
+      const bar = sparkBar(m.currentValue, m.previousValue);
       lines.push(
-        `• ${m.name}: ${formatValue(m.currentValue, m.unit)} (${arrow} ${absChange}% WoW)`,
+        `    ${trend}  *${m.name}:* ${formatValue(m.currentValue, m.unit)}  \`${bar}\`  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
       );
     }
     lines.push("");
@@ -731,11 +759,12 @@ export function formatMetricsForSlack(data: AmplitudeMetrics): string {
 
   // Growing accounts section
   if (data.growingAccounts.length > 0) {
-    lines.push("*Top Growing Accounts*");
+    lines.push(":fire: *Top Growing Accounts*");
     for (let i = 0; i < data.growingAccounts.length; i++) {
       const a = data.growingAccounts[i];
+      const rank = RANK_EMOJI[i] ?? `${i + 1}.`;
       lines.push(
-        `${i + 1}. ${a.teamSlug} — +${a.changePercent}% (${a.previousUsers} → ${a.currentUsers} users)`,
+        `    ${rank}  *${a.teamSlug}* — +${a.changePercent}% (${a.previousUsers} → ${a.currentUsers} users)`,
       );
     }
     lines.push("");
