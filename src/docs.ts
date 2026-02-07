@@ -11,6 +11,7 @@ import {
   DEFAULT_DOC_PAGE_SIZE,
   DOC_BACKFILL_INTERVAL_MS,
   LAST_BACKFILL_KEY,
+  KB_CACHE_TTL_SECONDS,
 } from "./constants";
 import {
   calculatePagination,
@@ -22,6 +23,7 @@ import {
 // KV keys
 const DOCS_INDEX_KEY = "docs:index";
 const DOCS_PREFIX = "docs:content:";
+const KB_CACHE_KEY = "cache:kb:assembled";
 
 // Typed error classes
 
@@ -197,6 +199,7 @@ export async function addDocument(
     charCount: content.length,
   });
   await saveIndex(env, index);
+  await invalidateKBCache(env);
 
   let indexMessage = "";
   try {
@@ -262,6 +265,7 @@ export async function updateDocument(
     addedBy: updatedBy,
   };
   await saveIndex(env, index);
+  await invalidateKBCache(env);
 
   // Re-index embeddings
   let indexMessage = "";
@@ -301,6 +305,7 @@ export async function removeDocument(
 
   index.documents.splice(docIndex, 1);
   await saveIndex(env, index);
+  await invalidateKBCache(env);
 
   try {
     await removeDocumentFromIndex(removed.title, env);
@@ -344,6 +349,12 @@ export async function listDocuments(
 }
 
 export async function getKnowledgeBase(env: Env): Promise<string | null> {
+  // Check cache first
+  const cached = await env.DOCS_KV.get(KB_CACHE_KEY);
+  if (cached) {
+    return cached;
+  }
+
   const index = await getIndex(env);
 
   if (index.documents.length === 0) {
@@ -366,7 +377,18 @@ export async function getKnowledgeBase(env: Env): Promise<string | null> {
     return null;
   }
 
-  return docs.join("\n\n---\n\n");
+  const assembled = docs.join("\n\n---\n\n");
+
+  // Cache the assembled KB
+  await env.DOCS_KV.put(KB_CACHE_KEY, assembled, {
+    expirationTtl: KB_CACHE_TTL_SECONDS,
+  });
+
+  return assembled;
+}
+
+async function invalidateKBCache(env: Env): Promise<void> {
+  await env.DOCS_KV.delete(KB_CACHE_KEY);
 }
 
 export async function getRandomDocument(

@@ -6,13 +6,14 @@
 
 import { INITIATIVES_KV } from "./kv";
 import type { Env, Initiative, InitiativeStatusValue } from "./types";
-import { LINEAR_SYNC_INTERVAL_MS, LAST_LINEAR_SYNC_KEY } from "./constants";
+import { LINEAR_SYNC_INTERVAL_MS, LAST_LINEAR_SYNC_KEY, LINEAR_PROJECTS_CACHE_TTL_SECONDS } from "./constants";
 
 // Linear GraphQL endpoint
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
 // KV key prefixes
 const LINEAR_MAP_PREFIX = "linear-map:";
+const LINEAR_PROJECTS_CACHE_KEY = "cache:linear:projects";
 
 interface LinearProject {
   id: string;
@@ -67,6 +68,12 @@ export async function fetchLinearProjects(env: Env): Promise<LinearProject[]> {
     throw new Error("LINEAR_API_KEY is not configured");
   }
 
+  // Check cache first
+  const cached = await env.DOCS_KV.get(LINEAR_PROJECTS_CACHE_KEY);
+  if (cached) {
+    return JSON.parse(cached) as LinearProject[];
+  }
+
   const query = `{
     projects(first: 50) {
       nodes {
@@ -103,7 +110,14 @@ export async function fetchLinearProjects(env: Env): Promise<LinearProject[]> {
     throw new Error(`Linear API error: ${data.errors[0].message}`);
   }
 
-  return data.data?.projects.nodes || [];
+  const projects = data.data?.projects.nodes || [];
+
+  // Cache the result
+  await env.DOCS_KV.put(LINEAR_PROJECTS_CACHE_KEY, JSON.stringify(projects), {
+    expirationTtl: LINEAR_PROJECTS_CACHE_TTL_SECONDS,
+  });
+
+  return projects;
 }
 
 async function updateExistingInitiative(

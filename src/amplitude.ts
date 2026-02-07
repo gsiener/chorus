@@ -8,12 +8,12 @@
 
 import type { Env } from "./types";
 import { postMessage } from "./slack";
+import { AMPLITUDE_CACHE_TTL_SECONDS } from "./constants";
 
 const AMPLITUDE_API_URL = "https://amplitude.com/api/2";
 
 // Cache configuration
 const CACHE_KEY = "amplitude:metrics:weekly";
-const CACHE_TTL_SECONDS = 900; // 15 minutes
 
 // Slack channel for weekly reports
 const WEEKLY_REPORT_CHANNEL = "CCESHFY67"; // #product-management
@@ -816,7 +816,7 @@ export async function getAmplitudeContext(
 
     // Cache the raw data (so both Slack and Claude formats can be derived)
     await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: CACHE_TTL_SECONDS,
+      expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
     });
 
     return formatMetricsForClaude(data);
@@ -849,7 +849,7 @@ export async function getAmplitudeMetrics(
   try {
     const data = await fetchAllMetrics(env);
     await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: CACHE_TTL_SECONDS,
+      expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
     });
     return data;
   } catch (error) {
@@ -873,7 +873,7 @@ async function getCachedOrFetchMetrics(env: Env): Promise<AmplitudeMetrics> {
 
   const data = await fetchAllMetrics(env);
   await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-    expirationTtl: CACHE_TTL_SECONDS,
+    expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
   });
   return data;
 }

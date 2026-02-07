@@ -50,6 +50,10 @@ export const CHECKIN_KV_TTL_SECONDS = 60 * 60 * 24 * 14; // 2 weeks
 // Cache TTLs
 export const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 export const USER_INFO_CACHE_TTL_SECONDS = 60 * 60; // 1 hour
+export const KB_CACHE_TTL_SECONDS = 600; // 10 minutes
+export const AMPLITUDE_CACHE_TTL_SECONDS = 3600; // 1 hour (data is weekly)
+export const LINEAR_PROJECTS_CACHE_TTL_SECONDS = 1800; // 30 minutes
+export const INITIATIVES_CACHE_TTL_SECONDS = 300; // 5 minutes
 
 // Scheduled sync intervals
 export const LINEAR_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours

@@ -6,6 +6,7 @@
  */
 
 import { INITIATIVES_KV } from "./kv";
+import { INITIATIVES_CACHE_TTL_SECONDS } from "./constants";
 import {
   calculatePagination,
   formatPaginationHeader,
@@ -25,6 +26,8 @@ import type {
   PaginationOptions,
 } from "./types";
 
+const INITIATIVES_INDEX_CACHE_KEY = "cache:initiatives:index";
+
 // Limits
 const MAX_NAME_LENGTH = 100;
 const MAX_DESCRIPTION_LENGTH = 5000;
@@ -40,21 +43,35 @@ function idToKey(id: string): string {
 }
 
 /**
- * Get the initiatives index from KV
+ * Get the initiatives index from KV, with cache
  */
 async function getIndex(env: Env): Promise<InitiativeIndex> {
+  const cached = await env.DOCS_KV.get(INITIATIVES_INDEX_CACHE_KEY);
+  if (cached) {
+    return JSON.parse(cached) as InitiativeIndex;
+  }
+
   const data = await env.DOCS_KV.get(INITIATIVES_KV.index);
   if (!data) {
     return { initiatives: [] };
   }
-  return JSON.parse(data) as InitiativeIndex;
+
+  const index = JSON.parse(data) as InitiativeIndex;
+
+  // Cache the parsed index
+  await env.DOCS_KV.put(INITIATIVES_INDEX_CACHE_KEY, data, {
+    expirationTtl: INITIATIVES_CACHE_TTL_SECONDS,
+  });
+
+  return index;
 }
 
 /**
- * Save the initiatives index to KV
+ * Save the initiatives index to KV and invalidate cache
  */
 async function saveIndex(env: Env, index: InitiativeIndex): Promise<void> {
   await env.DOCS_KV.put(INITIATIVES_KV.index, JSON.stringify(index));
+  await env.DOCS_KV.delete(INITIATIVES_INDEX_CACHE_KEY);
 }
 
 /**
