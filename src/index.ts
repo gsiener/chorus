@@ -31,6 +31,7 @@ import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects, checkAndSyncIfNeeded } from "./linear";
 import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./checkins";
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
+import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
@@ -280,6 +281,92 @@ async function handleDebugPriorities(request: Request, env: Env): Promise<Respon
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+/**
+ * Handle /api/debug/amplitude - debug Amplitude metrics integration
+ */
+async function handleDebugAmplitude(request: Request, env: Env): Promise<Response> {
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "GET") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Debug Amplitude triggered via API");
+
+  const url = new URL(request.url);
+  const shouldRefresh = url.searchParams.get("refresh") === "1";
+
+  try {
+    if (!env.AMPLITUDE_API_KEY || !env.AMPLITUDE_API_SECRET) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Amplitude API credentials not configured",
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (shouldRefresh) {
+      await clearAmplitudeCache(env);
+      console.log("Amplitude cache cleared due to refresh parameter");
+    }
+
+    const metrics = await getAmplitudeMetrics(env);
+
+    return new Response(JSON.stringify({
+      success: true,
+      metrics,
+    }, null, 2), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+/**
+ * Handle /api/test-metrics - post a test metrics report to the test channel
+ */
+async function handleTestMetrics(request: Request, env: Env): Promise<Response> {
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("Test metrics report triggered via API");
+  const result = await sendTestMetricsReport(env);
+
+  return new Response(JSON.stringify(result, null, 2), {
+    status: result.success ? 200 : 500,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 /**
@@ -648,6 +735,11 @@ export const handler = {
     // Run weekly check-ins
     ctx.waitUntil(sendWeeklyCheckins(env));
 
+    // Send weekly product metrics report on Mondays
+    if (new Date(controller.scheduledTime).getUTCDay() === 1) {
+      ctx.waitUntil(sendWeeklyMetricsReport(env));
+    }
+
     // Run brief checker
     ctx.waitUntil(
       checkInitiativeBriefs(env).then((result) => {
@@ -687,6 +779,16 @@ export const handler = {
     // Route /api/debug/priorities to debug Linear priorities
     if (url.pathname === "/api/debug/priorities") {
       return handleDebugPriorities(request, env);
+    }
+
+    // Route /api/debug/amplitude to debug Amplitude metrics
+    if (url.pathname === "/api/debug/amplitude") {
+      return handleDebugAmplitude(request, env);
+    }
+
+    // Route /api/test-metrics to post test report to test channel
+    if (url.pathname === "/api/test-metrics") {
+      return handleTestMetrics(request, env);
     }
 
     // Route /api/ask to ask Chorus a question directly

@@ -2,6 +2,7 @@ import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
 import { detectInitiativeGaps } from "./initiatives";
 import { getPrioritiesContext } from "./linear-priorities";
+import { getAmplitudeContext } from "./amplitude";
 import { fetchWithRetry, TimeoutError } from "./http-utils";
 import { fetchUserInfo, type UserInfo } from "./slack";
 import {
@@ -148,9 +149,10 @@ export async function generateResponse(
   // Load full knowledge base, priorities, gaps, and user info in parallel
   // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [knowledgeBase, prioritiesContext, gapNudge, userInfo] = await Promise.all([
+  const [knowledgeBase, prioritiesContext, amplitudeContext, gapNudge, userInfo] = await Promise.all([
     getKnowledgeBase(env),
     getPrioritiesContext(env),
+    getAmplitudeContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
     userId ? fetchUserInfo(userId, env) : Promise.resolve(null),
   ]);
@@ -195,6 +197,9 @@ ${prioritiesContext}`;
   // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
   // Users can access tracked initiatives via the `initiatives` command.
   // See PDD-65 for details.
+  if (amplitudeContext) {
+    systemPrompt += `\n\n## Product Metrics (from Amplitude)\n\n${amplitudeContext}`;
+  }
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }
@@ -327,9 +332,10 @@ export async function generateResponseStreaming(
   // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
   // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [knowledgeBase, prioritiesContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, prioritiesContext, amplitudeContext, gapNudge] = await Promise.all([
     getKnowledgeBase(env),
     getPrioritiesContext(env),
+    getAmplitudeContext(env),
     query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
@@ -366,6 +372,9 @@ ${prioritiesContext}`;
   // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
   // Users can access tracked initiatives via the `initiatives` command.
   // See PDD-65 for details.
+  if (amplitudeContext) {
+    systemPrompt += `\n\n## Product Metrics (from Amplitude)\n\n${amplitudeContext}`;
+  }
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
   }
