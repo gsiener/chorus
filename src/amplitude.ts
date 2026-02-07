@@ -858,6 +858,26 @@ export async function getAmplitudeMetrics(
   }
 }
 
+/**
+ * Get metrics from cache or fetch fresh, caching the result
+ */
+async function getCachedOrFetchMetrics(env: Env): Promise<AmplitudeMetrics> {
+  const cached = await env.DOCS_KV.get(CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as AmplitudeMetrics;
+    } catch {
+      // Invalid cache, fall through
+    }
+  }
+
+  const data = await fetchAllMetrics(env);
+  await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
+    expirationTtl: CACHE_TTL_SECONDS,
+  });
+  return data;
+}
+
 // --- Weekly Report ---
 
 /**
@@ -872,12 +892,7 @@ export async function sendWeeklyMetricsReport(
   }
 
   try {
-    const data = await fetchAllMetrics(env);
-
-    // Cache the data
-    await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: CACHE_TTL_SECONDS,
-    });
+    const data = await getCachedOrFetchMetrics(env);
 
     const message = formatMetricsForSlack(data);
     await postMessage(WEEKLY_REPORT_CHANNEL, message, undefined, env);
@@ -902,11 +917,7 @@ export async function sendTestMetricsReport(
   }
 
   try {
-    const data = await fetchAllMetrics(env);
-
-    await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: CACHE_TTL_SECONDS,
-    });
+    const data = await getCachedOrFetchMetrics(env);
 
     const message = formatMetricsForSlack(data);
     await postMessage(TEST_CHANNEL, message, undefined, env);

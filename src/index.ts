@@ -360,6 +360,18 @@ async function handleTestMetrics(request: Request, env: Env): Promise<Response> 
     });
   }
 
+  const url = new URL(request.url);
+  const channel = url.searchParams.get("channel");
+
+  if (channel === "production") {
+    console.log("Weekly metrics report triggered via API (production)");
+    const result = await sendWeeklyMetricsReport(env);
+    return new Response(JSON.stringify(result, null, 2), {
+      status: result.success ? 200 : 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   console.log("Test metrics report triggered via API");
   const result = await sendTestMetricsReport(env);
 
