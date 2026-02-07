@@ -19,6 +19,19 @@ const CACHE_TTL_SECONDS = 900; // 15 minutes
 const WEEKLY_REPORT_CHANNEL = "CCESHFY67"; // #product-management
 const TEST_CHANNEL = "C0A5NUH6GF4"; // #chorus-test
 
+// Amplitude chart URLs (metric name -> chart ID)
+const AMPLITUDE_CHART_BASE = "https://app.amplitude.com/analytics/honeycomb/chart";
+const CHART_IDS: Record<string, string> = {
+  "Monthly Active Teams": "b95qjuy9",
+  "DAU/MAU (Enterprise)": "g8j5k8bo",
+  "New Enterprise Users": "11234s52",
+  "Week 1 Retention": "nalng92",
+  "MTTI (Trace Viewers)": "e5wcni3n",
+  "Canvas & MCP Users": "01ylvdqg",
+  "Board Creates": "k9xr6g9z",
+  "SLO Engagement": "kmkl2tw2",
+};
+
 // --- Types ---
 
 export interface AmplitudeMetric {
@@ -609,79 +622,37 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
     fetchGrowingAccounts(env),
   ]);
 
+  const metric = (
+    name: string,
+    category: string,
+    currentValue: number,
+    previousValue: number,
+    unit: string,
+  ): AmplitudeMetric => {
+    const chartId = CHART_IDS[name];
+    return {
+      name,
+      category,
+      currentValue,
+      previousValue,
+      changePercent: calcChange(currentValue, previousValue),
+      unit,
+      chartUrl: chartId ? `${AMPLITUDE_CHART_BASE}/${chartId}` : undefined,
+    };
+  };
+
   const metrics: AmplitudeMetric[] = [
-    {
-      name: "Monthly Active Teams",
-      category: "Engagement",
-      currentValue: matCurrent,
-      previousValue: matPrevious,
-      changePercent: calcChange(matCurrent, matPrevious),
-      unit: "teams",
-    },
-    {
-      name: "DAU/MAU (Enterprise)",
-      category: "Engagement",
-      currentValue: Math.round(dauMauCurrent * 10) / 10,
-      previousValue: Math.round(dauMauPrevious * 10) / 10,
-      changePercent: calcChange(dauMauCurrent, dauMauPrevious),
-      unit: "%",
-    },
-    {
-      name: "New Enterprise Users",
-      category: "Activation & Retention",
-      currentValue: newEntCurrent,
-      previousValue: newEntPrevious,
-      changePercent: calcChange(newEntCurrent, newEntPrevious),
-      unit: "users",
-    },
-    {
-      name: "Week 1 Retention",
-      category: "Activation & Retention",
-      currentValue: Math.round(retentionCurrent * 10) / 10,
-      previousValue: Math.round(retentionPrevious * 10) / 10,
-      changePercent: calcChange(retentionCurrent, retentionPrevious),
-      unit: "%",
-    },
-    {
-      name: "MTTI (Trace Viewers)",
-      category: "Activation & Retention",
-      currentValue: mttiCurrent,
-      previousValue: mttiPrevious,
-      changePercent: calcChange(mttiCurrent, mttiPrevious),
-      unit: "users",
-    },
-    {
-      name: "Canvas & MCP Users",
-      category: "Feature Adoption",
-      currentValue: canvasCurrent,
-      previousValue: canvasPrevious,
-      changePercent: calcChange(canvasCurrent, canvasPrevious),
-      unit: "users",
-    },
-    {
-      name: "Board Creates",
-      category: "Feature Adoption",
-      currentValue: boardsCurrent,
-      previousValue: boardsPrevious,
-      changePercent: calcChange(boardsCurrent, boardsPrevious),
-      unit: "total",
-    },
-    {
-      name: "SLO Engagement",
-      category: "Feature Adoption",
-      currentValue: sloCurrent,
-      previousValue: sloPrevious,
-      changePercent: calcChange(sloCurrent, sloPrevious),
-      unit: "users",
-    },
-    {
-      name: "Sharing Users",
-      category: "Feature Adoption",
-      currentValue: sharingCurrent,
-      previousValue: sharingPrevious,
-      changePercent: calcChange(sharingCurrent, sharingPrevious),
-      unit: "users",
-    },
+    metric("Monthly Active Teams", "Engagement", matCurrent, matPrevious, "teams"),
+    metric("DAU/MAU (Enterprise)", "Engagement",
+      Math.round(dauMauCurrent * 10) / 10, Math.round(dauMauPrevious * 10) / 10, "%"),
+    metric("New Enterprise Users", "Activation & Retention", newEntCurrent, newEntPrevious, "users"),
+    metric("Week 1 Retention", "Activation & Retention",
+      Math.round(retentionCurrent * 10) / 10, Math.round(retentionPrevious * 10) / 10, "%"),
+    metric("MTTI (Trace Viewers)", "Activation & Retention", mttiCurrent, mttiPrevious, "users"),
+    metric("Canvas & MCP Users", "Feature Adoption", canvasCurrent, canvasPrevious, "users"),
+    metric("Board Creates", "Feature Adoption", boardsCurrent, boardsPrevious, "total"),
+    metric("SLO Engagement", "Feature Adoption", sloCurrent, sloPrevious, "users"),
+    metric("Sharing Users", "Feature Adoption", sharingCurrent, sharingPrevious, "users"),
   ];
 
   return {
@@ -749,8 +720,11 @@ export function formatMetricsForSlack(data: AmplitudeMetrics): string {
     for (const m of metrics) {
       const absChange = Math.abs(m.changePercent);
       const bar = sparkBar(m.currentValue, m.previousValue);
+      const label = m.chartUrl
+        ? `<${m.chartUrl}|${m.name}>`
+        : m.name;
       lines.push(
-        `    *${m.name}:* ${formatValue(m.currentValue, m.unit)}  \`${bar}\`  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
+        `    *${label}:* ${formatValue(m.currentValue, m.unit)}  \`${bar}\`  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
       );
     }
     lines.push("");
@@ -785,8 +759,9 @@ export function formatMetricsForClaude(data: AmplitudeMetrics): string {
   for (const m of data.metrics) {
     const arrow = trendArrow(m.changePercent);
     const absChange = Math.abs(m.changePercent);
+    const urlSuffix = m.chartUrl ? ` [${m.chartUrl}]` : "";
     lines.push(
-      `- ${m.name}: ${formatValue(m.currentValue, m.unit)} (${arrow} ${absChange}% week-over-week)`,
+      `- ${m.name}: ${formatValue(m.currentValue, m.unit)} (${arrow} ${absChange}% week-over-week)${urlSuffix}`,
     );
   }
 

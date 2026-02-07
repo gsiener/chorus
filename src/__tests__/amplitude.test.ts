@@ -195,6 +195,7 @@ describe("Amplitude Integration", () => {
           previousValue: 472,
           changePercent: 3.2,
           unit: "teams",
+          chartUrl: "https://app.amplitude.com/analytics/honeycomb/chart/b95qjuy9",
         },
         {
           name: "DAU/MAU (Enterprise)",
@@ -203,6 +204,7 @@ describe("Amplitude Integration", () => {
           previousValue: 31.1,
           changePercent: 0.3,
           unit: "%",
+          chartUrl: "https://app.amplitude.com/analytics/honeycomb/chart/g8j5k8bo",
         },
         {
           name: "Canvas & MCP Users",
@@ -211,6 +213,7 @@ describe("Amplitude Integration", () => {
           previousValue: 263,
           changePercent: 18.6,
           unit: "users",
+          chartUrl: "https://app.amplitude.com/analytics/honeycomb/chart/01ylvdqg",
         },
       ],
       growingAccounts: [
@@ -237,7 +240,7 @@ describe("Amplitude Integration", () => {
 
       expect(result).toContain(":bar_chart:");
       expect(result).toContain("*Weekly Product Metrics*");
-      expect(result).toContain("*Monthly Active Teams:* 487");
+      expect(result).toContain("Monthly Active Teams>:* 487");
       expect(result).toContain("↑ 3.2% WoW");
       // Spark bars present in backticks
       expect(result).toContain("▓");
@@ -247,7 +250,7 @@ describe("Amplitude Integration", () => {
       const result = formatMetricsForSlack(sampleData);
 
       // DAU/MAU has 0.3% change -> steady arrow
-      expect(result).toContain("*DAU/MAU (Enterprise):* 31.2%");
+      expect(result).toContain("DAU/MAU (Enterprise)>:* 31.2%");
       expect(result).toContain("→ 0.3% WoW");
     });
 
@@ -275,6 +278,38 @@ describe("Amplitude Integration", () => {
       expect(result).toContain("142 → 180 users");
     });
 
+    it("links metric names to Amplitude charts", () => {
+      const result = formatMetricsForSlack(sampleData);
+
+      // Metric names should be Slack links
+      expect(result).toContain(
+        "<https://app.amplitude.com/analytics/honeycomb/chart/b95qjuy9|Monthly Active Teams>",
+      );
+      expect(result).toContain(
+        "<https://app.amplitude.com/analytics/honeycomb/chart/g8j5k8bo|DAU/MAU (Enterprise)>",
+      );
+    });
+
+    it("renders metric name without link when no chartUrl", () => {
+      const dataNoUrl: AmplitudeMetrics = {
+        ...sampleData,
+        metrics: [
+          {
+            name: "Sharing Users",
+            category: "Feature Adoption",
+            currentValue: 245,
+            previousValue: 230,
+            changePercent: 6.5,
+            unit: "users",
+          },
+        ],
+      };
+      const result = formatMetricsForSlack(dataNoUrl);
+
+      expect(result).toContain("*Sharing Users:*");
+      expect(result).not.toContain("<http");
+    });
+
     it("omits growing accounts section when empty", () => {
       const dataNoGrowth = { ...sampleData, growingAccounts: [] };
       const result = formatMetricsForSlack(dataNoGrowth);
@@ -293,6 +328,7 @@ describe("Amplitude Integration", () => {
           previousValue: 472,
           changePercent: 3.2,
           unit: "teams",
+          chartUrl: "https://app.amplitude.com/analytics/honeycomb/chart/b95qjuy9",
         },
       ],
       growingAccounts: [
@@ -314,6 +350,14 @@ describe("Amplitude Integration", () => {
       expect(result).toContain("Product metrics for the week of");
       expect(result).toContain("Monthly Active Teams: 487");
       expect(result).toContain("↑ 3.2% week-over-week");
+    });
+
+    it("includes chart URLs", () => {
+      const result = formatMetricsForClaude(sampleData);
+
+      expect(result).toContain(
+        "[https://app.amplitude.com/analytics/honeycomb/chart/b95qjuy9]",
+      );
     });
 
     it("includes growing accounts", () => {
@@ -355,6 +399,12 @@ describe("Amplitude Integration", () => {
 
       expect(result.metrics).toHaveLength(9);
       expect(result.metrics[0].name).toBe("Monthly Active Teams");
+      expect(result.metrics[0].chartUrl).toBe(
+        "https://app.amplitude.com/analytics/honeycomb/chart/b95qjuy9",
+      );
+      // Sharing Users has no chart ID
+      const sharing = result.metrics.find((m) => m.name === "Sharing Users");
+      expect(sharing?.chartUrl).toBeUndefined();
       expect(result.fetchedAt).toBeDefined();
       expect(result.weekStart).toMatch(/^\d{8}$/);
       expect(result.weekEnd).toMatch(/^\d{8}$/);
