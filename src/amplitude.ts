@@ -470,9 +470,18 @@ async function fetchGrowingAccounts(
   const groupedEvent = {
     event_type: "_active",
     group_by: [{ type: "event", value: "team_slug" }],
+    filters: [
+      {
+        group_type: "User",
+        subprop_type: "user",
+        subprop_key: "gp:team_plan",
+        subprop_op: "is",
+        subprop_value: ["Enterprise"],
+      },
+    ],
   };
 
-  // Fetch active users grouped by team_slug for both weeks
+  // Fetch active Enterprise users grouped by team_slug for both weeks
   const [currentResult, previousResult] = await Promise.all([
     querySegmentation(
       {
@@ -481,7 +490,6 @@ async function fetchGrowingAccounts(
         end: currentEnd,
         m: "uniques",
         i: 7,
-        s: ENTERPRISE_SEGMENT,
       },
       env,
     ),
@@ -492,7 +500,6 @@ async function fetchGrowingAccounts(
         end: previousEnd,
         m: "uniques",
         i: 7,
-        s: ENTERPRISE_SEGMENT,
       },
       env,
     ),
@@ -506,7 +513,7 @@ async function fetchGrowingAccounts(
   const accounts: GrowingAccount[] = [];
   for (const [slug, currentUsers] of Object.entries(currentTeams)) {
     const previousUsers = previousTeams[slug] ?? 0;
-    if (previousUsers < 5) continue; // Skip small teams to avoid noise
+    if (previousUsers < 20) continue; // Enterprise accounts have 20+ users
     const changePercent =
       previousUsers > 0
         ? ((currentUsers - previousUsers) / previousUsers) * 100
@@ -695,19 +702,13 @@ function trendArrow(changePercent: number): string {
 }
 
 /**
- * Build a colored spark bar using emoji squares.
- * Color reflects trend direction: green (up), red (down), white (steady).
+ * Build a spark bar showing relative magnitude (1-8 blocks)
  */
-function sparkBar(current: number, previous: number, changePercent: number): string {
-  const ratio = previous === 0 ? 2 : Math.min(current / previous, 2);
-  const blocks = Math.max(1, Math.min(5, Math.round(ratio * 2.5)));
-
-  let filled: string;
-  if (changePercent > 1) filled = ":large_green_square:";
-  else if (changePercent < -1) filled = ":large_red_square:";
-  else filled = ":white_large_square:";
-
-  return filled.repeat(blocks);
+function sparkBar(current: number, previous: number): string {
+  if (previous === 0) return "▓▓▓▓▓▓▓▓";
+  const ratio = Math.min(current / previous, 2);
+  const blocks = Math.max(1, Math.round(ratio * 4));
+  return "▓".repeat(blocks) + "░".repeat(Math.max(0, 8 - blocks));
 }
 
 function formatValue(value: number, unit: string): string {
@@ -747,9 +748,9 @@ export function formatMetricsForSlack(data: AmplitudeMetrics): string {
     lines.push(`${emoji} *${category}*`);
     for (const m of metrics) {
       const absChange = Math.abs(m.changePercent);
-      const bar = sparkBar(m.currentValue, m.previousValue, m.changePercent);
+      const bar = sparkBar(m.currentValue, m.previousValue);
       lines.push(
-        `    *${m.name}:* ${formatValue(m.currentValue, m.unit)}  ${bar}  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
+        `    *${m.name}:* ${formatValue(m.currentValue, m.unit)}  \`${bar}\`  ${trendArrow(m.changePercent)} ${absChange}% WoW`,
       );
     }
     lines.push("");

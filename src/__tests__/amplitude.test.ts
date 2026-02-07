@@ -232,33 +232,30 @@ describe("Amplitude Integration", () => {
       weekEnd: "20260201",
     };
 
-    it("formats metrics with colored spark bars", () => {
+    it("formats metrics with spark bars and trend arrows", () => {
       const result = formatMetricsForSlack(sampleData);
 
       expect(result).toContain(":bar_chart:");
       expect(result).toContain("*Weekly Product Metrics*");
       expect(result).toContain("*Monthly Active Teams:* 487");
       expect(result).toContain("↑ 3.2% WoW");
-      // No colored circles at start of lines
-      expect(result).not.toContain(":large_green_circle:");
-      expect(result).not.toContain(":red_circle:");
-      expect(result).not.toContain(":white_circle:");
+      // Spark bars present in backticks
+      expect(result).toContain("▓");
     });
 
-    it("uses white bars for steady metrics", () => {
+    it("uses steady arrow for small changes", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      // DAU/MAU has 0.3% change -> steady -> white bars
+      // DAU/MAU has 0.3% change -> steady arrow
       expect(result).toContain("*DAU/MAU (Enterprise):* 31.2%");
       expect(result).toContain("→ 0.3% WoW");
-      expect(result).toContain(":white_large_square:");
     });
 
-    it("uses green bars for positive and red for negative trends", () => {
+    it("uses up arrow for positive trends", () => {
       const result = formatMetricsForSlack(sampleData);
 
-      // Canvas & MCP Users has 18.6% -> green bars
-      expect(result).toContain(":large_green_square:");
+      // Canvas & MCP Users has 18.6% -> up arrow
+      expect(result).toContain("↑ 18.6% WoW");
     });
 
     it("groups metrics by category with emojis", () => {
