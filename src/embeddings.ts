@@ -12,6 +12,9 @@ const CHUNK_SIZE = 1000; // characters per chunk
 const CHUNK_OVERLAP = 200; // overlap between chunks
 const MIN_CHUNK_SIZE = 100; // don't create tiny chunks
 
+// KV key for storing chunk counts (used for precise cleanup)
+const CHUNK_COUNT_PREFIX = "embeddings:chunks:";
+
 // Embedding model: bge-base-en-v1.5 produces 768-dimensional vectors
 const EMBEDDING_MODEL = "@cf/baai/bge-base-en-v1.5";
 
@@ -183,6 +186,10 @@ export async function indexDocument(
       await env.VECTORIZE.insert(vectors);
     }
 
+    // Store chunk count for precise cleanup during removal
+    const sanitizedTitle = sanitizeTitleForId(title);
+    await env.DOCS_KV.put(`${CHUNK_COUNT_PREFIX}${sanitizedTitle}`, vectors.length.toString());
+
     return {
       success: true,
       chunksIndexed: vectors.length,
@@ -208,15 +215,17 @@ export async function removeDocumentFromIndex(
   try {
     const sanitizedTitle = sanitizeTitleForId(title);
 
-    // We need to delete all chunks for this document
-    // Vectorize doesn't support wildcard deletes, so we try to delete
-    // a reasonable number of potential chunk IDs
+    // Use stored chunk count for precise deletion, fall back to 100 if unknown
+    const storedCount = await env.DOCS_KV.get(`${CHUNK_COUNT_PREFIX}${sanitizedTitle}`);
+    const chunkCount = storedCount ? parseInt(storedCount, 10) : 100;
+
     const idsToDelete: string[] = [];
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < chunkCount; i++) {
       idsToDelete.push(`doc:${sanitizedTitle}:chunk:${i}`);
     }
 
     await env.VECTORIZE.deleteByIds(idsToDelete);
+    await env.DOCS_KV.delete(`${CHUNK_COUNT_PREFIX}${sanitizedTitle}`);
 
     return {
       success: true,

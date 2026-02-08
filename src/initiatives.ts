@@ -577,13 +577,10 @@ export async function searchInitiatives(
   const queryLower = query.toLowerCase();
   const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
 
-  const results: { initiative: InitiativeMetadata; score: number; snippet: string }[] = [];
-
-  for (const meta of index.initiatives) {
+  // First pass: score by name only, identify which need description lookup
+  const nameScored = index.initiatives.map((meta) => {
     let score = 0;
     let snippet = "";
-
-    // Check name match (higher weight)
     const nameLower = meta.name.toLowerCase();
     if (nameLower.includes(queryLower)) {
       score += 10;
@@ -595,17 +592,33 @@ export async function searchInitiatives(
         }
       }
     }
+    return { meta, score, snippet, needsDescription: score === 0 || !snippet };
+  });
 
-    // Load full initiative to search description
-    if (score === 0 || !snippet) {
-      const data = await env.DOCS_KV.get(idToKey(meta.id));
-      if (data) {
-        const init = JSON.parse(data) as Initiative;
+  // Fetch descriptions in parallel for items that need them
+  const needDescription = nameScored.filter((r) => r.needsDescription);
+  const descriptionData = await Promise.all(
+    needDescription.map((r) => env.DOCS_KV.get(idToKey(r.meta.id)))
+  );
+  const descriptionMap = new Map<string, Initiative>();
+  needDescription.forEach((r, i) => {
+    const data = descriptionData[i];
+    if (data) {
+      descriptionMap.set(r.meta.id, JSON.parse(data) as Initiative);
+    }
+  });
+
+  // Second pass: add description scores
+  const results: { initiative: InitiativeMetadata; score: number; snippet: string }[] = [];
+  for (const item of nameScored) {
+    let { score, snippet } = item;
+
+    if (item.needsDescription) {
+      const init = descriptionMap.get(item.meta.id);
+      if (init) {
         const descLower = (init.description || "").toLowerCase();
-
         if (descLower.includes(queryLower)) {
           score += 5;
-          // Extract snippet around match
           const matchIndex = descLower.indexOf(queryLower);
           snippet = extractSnippet(init.description, matchIndex, queryLower.length, 30, 50);
         } else {
@@ -624,9 +637,9 @@ export async function searchInitiatives(
 
     if (score > 0) {
       results.push({
-        initiative: meta,
+        initiative: item.meta,
         score,
-        snippet: snippet || meta.name,
+        snippet: snippet || item.meta.name,
       });
     }
   }
@@ -653,17 +666,16 @@ export async function detectInitiativeGaps(
 
   // Look for initiative names mentioned in the text (case-insensitive)
   const textLower = text.toLowerCase();
-  const mentionedInitiatives: Initiative[] = [];
+  const matchingMeta = index.initiatives.filter(
+    (meta) => textLower.includes(meta.name.toLowerCase())
+  );
 
-  for (const meta of index.initiatives) {
-    // Check if initiative name is mentioned
-    if (textLower.includes(meta.name.toLowerCase())) {
-      const data = await env.DOCS_KV.get(idToKey(meta.id));
-      if (data) {
-        mentionedInitiatives.push(JSON.parse(data) as Initiative);
-      }
-    }
-  }
+  const mentionedData = await Promise.all(
+    matchingMeta.map((meta) => env.DOCS_KV.get(idToKey(meta.id)))
+  );
+  const mentionedInitiatives = mentionedData
+    .filter((data): data is string => data !== null)
+    .map((data) => JSON.parse(data) as Initiative);
 
   // Find the first initiative with gaps
   for (const init of mentionedInitiatives) {

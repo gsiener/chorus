@@ -989,15 +989,12 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       const fileNames = files.map(f => f.name).join(", ");
       await postMessage(channel, `📄 Processing ${files.length > 1 ? "files" : "file"}: ${fileNames}...`, threadTs, env);
 
-      const results: string[] = [];
-
-      for (const file of files) {
+      const results = await Promise.all(files.map(async (file) => {
         try {
           const extracted = await extractFileContent(file, env);
           if (extracted) {
             const title = titleFromFilename(extracted.filename);
             const result = await addDocument(env, title, extracted.content, user);
-            results.push(result.message);
             recordFileProcessing({
               fileName: file.name,
               fileType: file.mimetype,
@@ -1005,8 +1002,8 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
               extractedLength: extracted.content.length,
               success: true,
             });
+            return result.message;
           } else {
-            results.push(`Couldn't extract text from "${file.name}" (unsupported format or empty).`);
             recordFileProcessing({
               fileName: file.name,
               fileType: file.mimetype,
@@ -1014,10 +1011,10 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
               success: false,
               errorMessage: "unsupported format or empty",
             });
+            return `Couldn't extract text from "${file.name}" (unsupported format or empty).`;
           }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
-          results.push(`Error processing "${file.name}": ${errMsg}`);
           recordFileProcessing({
             fileName: file.name,
             fileType: file.mimetype,
@@ -1025,8 +1022,9 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
             success: false,
             errorMessage: errMsg,
           });
+          return `Error processing "${file.name}": ${errMsg}`;
         }
-      }
+      }));
 
       await postMessage(channel, results.join("\n"), threadTs, env);
       return;

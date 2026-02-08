@@ -186,7 +186,7 @@ async function createAndStoreNewInitiative(
   // Store initiative
   await env.DOCS_KV.put(`${INITIATIVES_KV.prefix}${id}`, JSON.stringify(initiative));
 
-  // Update index
+  // Update in-memory index (written once at end of syncLinearProjects)
   index.initiatives.push({
     id,
     name: project.name,
@@ -196,8 +196,6 @@ async function createAndStoreNewInitiative(
     hasPrd: false,
     updatedAt: now,
   });
-  index.lastSyncedWithLinear = now; // This will be updated again at the end, but good to keep consistent
-  await env.DOCS_KV.put(INITIATIVES_KV.index, JSON.stringify(index));
 
   // Store mapping
   await env.DOCS_KV.put(`${LINEAR_MAP_PREFIX}${project.id}`, id);
