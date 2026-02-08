@@ -14,6 +14,15 @@ const AMPLITUDE_API_URL = "https://amplitude.com/api/2";
 
 // Cache configuration
 const CACHE_KEY = "amplitude:metrics:weekly";
+const CACHE_LOCK_KEY = "amplitude:metrics:refreshing";
+const CACHE_LOCK_TTL_SECONDS = 60;
+// Store with 2x TTL so stale data survives for stale-while-revalidate
+const CACHE_STORE_TTL_SECONDS = AMPLITUDE_CACHE_TTL_SECONDS * 2;
+
+// Retry configuration
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;
+const BATCH_SIZE = 6;
 
 // Slack channel for weekly reports
 const WEEKLY_REPORT_CHANNEL = "CCESHFY67"; // #product-management
@@ -145,6 +154,44 @@ interface RetentionResult {
 }
 
 /**
+ * Retry wrapper with exponential backoff for transient API failures
+ */
+async function fetchWithRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+): Promise<T> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRetryable = error instanceof Error &&
+        (error.message.includes("429") || error.message.includes("5"));
+      if (!isRetryable || attempt === MAX_RETRIES) throw error;
+      const delayMs = RETRY_BASE_MS * Math.pow(2, attempt);
+      console.warn(`Amplitude ${label} retry ${attempt + 1}/${MAX_RETRIES} after ${delayMs}ms`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("unreachable");
+}
+
+/**
+ * Run promises in batches to limit concurrency
+ */
+async function runInBatches<T>(
+  tasks: (() => Promise<T>)[],
+  batchSize: number,
+): Promise<T[]> {
+  const results: T[] = [];
+  for (let i = 0; i < tasks.length; i += batchSize) {
+    const batch = tasks.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map((fn) => fn()));
+    results.push(...batchResults);
+  }
+  return results;
+}
+
+/**
  * Query Amplitude event segmentation endpoint
  */
 async function querySegmentation(
@@ -159,26 +206,28 @@ async function querySegmentation(
   },
   env: Env,
 ): Promise<SegmentationResult> {
-  const url = new URL(`${AMPLITUDE_API_URL}/events/segmentation`);
-  url.searchParams.set("e", JSON.stringify(params.e));
-  url.searchParams.set("start", params.start);
-  url.searchParams.set("end", params.end);
-  if (params.m) url.searchParams.set("m", params.m);
-  if (params.i !== undefined) url.searchParams.set("i", String(params.i));
-  if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
-  if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
+  return fetchWithRetry(async () => {
+    const url = new URL(`${AMPLITUDE_API_URL}/events/segmentation`);
+    url.searchParams.set("e", JSON.stringify(params.e));
+    url.searchParams.set("start", params.start);
+    url.searchParams.set("end", params.end);
+    if (params.m) url.searchParams.set("m", params.m);
+    if (params.i !== undefined) url.searchParams.set("i", String(params.i));
+    if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
+    if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: buildAuthHeader(env) },
-  });
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: buildAuthHeader(env) },
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`Amplitude segmentation error: ${response.status} - ${text}`);
-    throw new Error(`Amplitude API error: ${response.status}`);
-  }
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Amplitude segmentation error: ${response.status} - ${text}`);
+      throw new Error(`Amplitude API error: ${response.status}`);
+    }
 
-  return response.json() as Promise<SegmentationResult>;
+    return response.json() as Promise<SegmentationResult>;
+  }, "segmentation");
 }
 
 /**
@@ -196,26 +245,28 @@ async function queryRetention(
   },
   env: Env,
 ): Promise<RetentionResult> {
-  const url = new URL(`${AMPLITUDE_API_URL}/retention`);
-  url.searchParams.set("se", JSON.stringify(params.se));
-  url.searchParams.set("re", JSON.stringify(params.re));
-  url.searchParams.set("start", params.start);
-  url.searchParams.set("end", params.end);
-  if (params.rm) url.searchParams.set("rm", params.rm);
-  if (params.i !== undefined) url.searchParams.set("i", String(params.i));
-  if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
+  return fetchWithRetry(async () => {
+    const url = new URL(`${AMPLITUDE_API_URL}/retention`);
+    url.searchParams.set("se", JSON.stringify(params.se));
+    url.searchParams.set("re", JSON.stringify(params.re));
+    url.searchParams.set("start", params.start);
+    url.searchParams.set("end", params.end);
+    if (params.rm) url.searchParams.set("rm", params.rm);
+    if (params.i !== undefined) url.searchParams.set("i", String(params.i));
+    if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
 
-  const response = await fetch(url.toString(), {
-    headers: { Authorization: buildAuthHeader(env) },
-  });
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: buildAuthHeader(env) },
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`Amplitude retention error: ${response.status} - ${text}`);
-    throw new Error(`Amplitude API error: ${response.status}`);
-  }
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Amplitude retention error: ${response.status} - ${text}`);
+      throw new Error(`Amplitude API error: ${response.status}`);
+    }
 
-  return response.json() as Promise<RetentionResult>;
+    return response.json() as Promise<RetentionResult>;
+  }, "retention");
 }
 
 /**
@@ -588,7 +639,7 @@ function calcChange(current: number, previous: number): number {
 export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
   const { currentStart, currentEnd, previousStart, previousEnd } = getWeekRanges();
 
-  // Fetch all metrics in parallel for both periods
+  // Fetch metrics in batches to avoid overwhelming Amplitude rate limits
   const [
     matCurrent, matPrevious,
     dauMauCurrent, dauMauPrevious,
@@ -600,27 +651,32 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
     sloCurrent, sloPrevious,
     sharingCurrent, sharingPrevious,
     growingAccounts,
-  ] = await Promise.all([
-    fetchMAT(currentStart, currentEnd, env),
-    fetchMAT(previousStart, previousEnd, env),
-    fetchDAUMAU(currentStart, currentEnd, env),
-    fetchDAUMAU(previousStart, previousEnd, env),
-    fetchMTTI(currentStart, currentEnd, env),
-    fetchMTTI(previousStart, previousEnd, env),
-    fetchCanvasMCPUsers(currentStart, currentEnd, env),
-    fetchCanvasMCPUsers(previousStart, previousEnd, env),
-    fetchNewEnterpriseUsers(currentStart, currentEnd, env),
-    fetchNewEnterpriseUsers(previousStart, previousEnd, env),
-    fetchWeek1Retention(currentStart, currentEnd, env),
-    fetchWeek1Retention(previousStart, previousEnd, env),
-    fetchBoardCreates(currentStart, currentEnd, env),
-    fetchBoardCreates(previousStart, previousEnd, env),
-    fetchSLOEngagement(currentStart, currentEnd, env),
-    fetchSLOEngagement(previousStart, previousEnd, env),
-    fetchSharingUsers(currentStart, currentEnd, env),
-    fetchSharingUsers(previousStart, previousEnd, env),
-    fetchGrowingAccounts(env),
-  ]);
+  ] = await runInBatches([
+    () => fetchMAT(currentStart, currentEnd, env),
+    () => fetchMAT(previousStart, previousEnd, env),
+    () => fetchDAUMAU(currentStart, currentEnd, env),
+    () => fetchDAUMAU(previousStart, previousEnd, env),
+    () => fetchMTTI(currentStart, currentEnd, env),
+    () => fetchMTTI(previousStart, previousEnd, env),
+    () => fetchCanvasMCPUsers(currentStart, currentEnd, env),
+    () => fetchCanvasMCPUsers(previousStart, previousEnd, env),
+    () => fetchNewEnterpriseUsers(currentStart, currentEnd, env),
+    () => fetchNewEnterpriseUsers(previousStart, previousEnd, env),
+    () => fetchWeek1Retention(currentStart, currentEnd, env),
+    () => fetchWeek1Retention(previousStart, previousEnd, env),
+    () => fetchBoardCreates(currentStart, currentEnd, env),
+    () => fetchBoardCreates(previousStart, previousEnd, env),
+    () => fetchSLOEngagement(currentStart, currentEnd, env),
+    () => fetchSLOEngagement(previousStart, previousEnd, env),
+    () => fetchSharingUsers(currentStart, currentEnd, env),
+    () => fetchSharingUsers(previousStart, previousEnd, env),
+    () => fetchGrowingAccounts(env),
+  ] as (() => Promise<number | number[] | GrowingAccount[]>)[], BATCH_SIZE) as [
+    number, number, number, number, number, number,
+    number, number, number, number, number, number,
+    number, number, number, number, number, number,
+    GrowingAccount[],
+  ];
 
   const metric = (
     name: string,
@@ -785,7 +841,70 @@ export function formatMetricsForClaude(data: AmplitudeMetrics): string {
  */
 export async function clearAmplitudeCache(env: Env): Promise<void> {
   await env.DOCS_KV.delete(CACHE_KEY);
+  await env.DOCS_KV.delete(CACHE_LOCK_KEY);
   console.log("Amplitude metrics cache cleared");
+}
+
+/**
+ * Check if cached metrics are still within the freshness window
+ */
+function isCacheFresh(data: AmplitudeMetrics): boolean {
+  const fetchedAt = new Date(data.fetchedAt).getTime();
+  return Date.now() - fetchedAt < AMPLITUDE_CACHE_TTL_SECONDS * 1000;
+}
+
+/**
+ * Stale-while-revalidate: fetch fresh data if cache is stale,
+ * but prevent multiple concurrent refreshes (stampede protection).
+ * Returns cached data (even stale) if another request is already refreshing.
+ */
+async function getOrRefreshMetrics(env: Env): Promise<AmplitudeMetrics | null> {
+  const cached = await env.DOCS_KV.get(CACHE_KEY);
+  if (cached) {
+    try {
+      const data = JSON.parse(cached) as AmplitudeMetrics;
+      if (isCacheFresh(data)) return data;
+
+      // Stale — check if someone else is already refreshing
+      const isRefreshing = await env.DOCS_KV.get(CACHE_LOCK_KEY);
+      if (isRefreshing) {
+        console.log("Amplitude cache stale but refresh in progress, returning stale");
+        return data;
+      }
+
+      // Acquire lock and refresh
+      await env.DOCS_KV.put(CACHE_LOCK_KEY, "1", { expirationTtl: CACHE_LOCK_TTL_SECONDS });
+      try {
+        const fresh = await fetchAllMetrics(env);
+        await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(fresh), {
+          expirationTtl: CACHE_STORE_TTL_SECONDS,
+        });
+        return fresh;
+      } finally {
+        await env.DOCS_KV.delete(CACHE_LOCK_KEY);
+      }
+    } catch {
+      // Invalid cache, fall through
+    }
+  }
+
+  // No cache at all — acquire lock and fetch
+  const isRefreshing = await env.DOCS_KV.get(CACHE_LOCK_KEY);
+  if (isRefreshing) {
+    console.log("Amplitude cache empty but refresh in progress, returning null");
+    return null;
+  }
+
+  await env.DOCS_KV.put(CACHE_LOCK_KEY, "1", { expirationTtl: CACHE_LOCK_TTL_SECONDS });
+  try {
+    const data = await fetchAllMetrics(env);
+    await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
+      expirationTtl: CACHE_STORE_TTL_SECONDS,
+    });
+    return data;
+  } finally {
+    await env.DOCS_KV.delete(CACHE_LOCK_KEY);
+  }
 }
 
 /**
@@ -799,27 +918,9 @@ export async function getAmplitudeContext(
     return null;
   }
 
-  // Check cache first
-  const cached = await env.DOCS_KV.get(CACHE_KEY);
-  if (cached) {
-    console.log("Using cached Amplitude metrics context");
-    try {
-      const data = JSON.parse(cached) as AmplitudeMetrics;
-      return formatMetricsForClaude(data);
-    } catch {
-      // Invalid cache, fall through to fetch
-    }
-  }
-
   try {
-    const data = await fetchAllMetrics(env);
-
-    // Cache the raw data (so both Slack and Claude formats can be derived)
-    await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
-    });
-
-    return formatMetricsForClaude(data);
+    const data = await getOrRefreshMetrics(env);
+    return data ? formatMetricsForClaude(data) : null;
   } catch (error) {
     console.error("Failed to fetch Amplitude metrics:", error);
     return null;
@@ -836,22 +937,8 @@ export async function getAmplitudeMetrics(
     return null;
   }
 
-  // Check cache first
-  const cached = await env.DOCS_KV.get(CACHE_KEY);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as AmplitudeMetrics;
-    } catch {
-      // Invalid cache, fall through
-    }
-  }
-
   try {
-    const data = await fetchAllMetrics(env);
-    await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-      expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
-    });
-    return data;
+    return await getOrRefreshMetrics(env);
   } catch (error) {
     console.error("Failed to fetch Amplitude metrics:", error);
     return null;
@@ -859,23 +946,13 @@ export async function getAmplitudeMetrics(
 }
 
 /**
- * Get metrics from cache or fetch fresh, caching the result
+ * Get metrics from cache or fetch fresh (for report sending)
  */
 async function getCachedOrFetchMetrics(env: Env): Promise<AmplitudeMetrics> {
-  const cached = await env.DOCS_KV.get(CACHE_KEY);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as AmplitudeMetrics;
-    } catch {
-      // Invalid cache, fall through
-    }
-  }
-
-  const data = await fetchAllMetrics(env);
-  await env.DOCS_KV.put(CACHE_KEY, JSON.stringify(data), {
-    expirationTtl: AMPLITUDE_CACHE_TTL_SECONDS,
-  });
-  return data;
+  const data = await getOrRefreshMetrics(env);
+  if (data) return data;
+  // Fallback: if lock prevented fetch and no cache, force fetch
+  return fetchAllMetrics(env);
 }
 
 // --- Weekly Report ---
