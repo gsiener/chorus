@@ -16,7 +16,7 @@ const RD_PRIORITIES_INITIATIVE_ID = "6aaaa863-a398-4116-ab4f-830606ce4744";
 const CACHE_KEY = "linear:priorities:context";
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 
-interface LinearInitiative {
+export interface LinearInitiative {
   id: string;
   name: string;
   description: string | null;
@@ -57,9 +57,10 @@ interface LinearResponse {
 /**
  * Extract R&D Priority metadata from initiative description or content
  */
-function extractPriorityMetadata(initiative: LinearInitiative): {
+export function extractPriorityMetadata(initiative: LinearInitiative): {
   techRisk: string | null;
   theme: string | null;
+  slackChannel: string | null;
 } {
   const text = `${initiative.description || ""}\n${initiative.content || ""}`;
 
@@ -72,7 +73,11 @@ function extractPriorityMetadata(initiative: LinearInitiative): {
   const themeMatch = text.match(/Theme:\s*(.+?)(?:\n|$)/);
   const theme = themeMatch ? themeMatch[1].trim() : null;
 
-  return { techRisk, theme };
+  // Extract Slack channel (e.g., "- Slack: #proj-channel")
+  const slackMatch = text.match(/Slack:\s*(#[\w-]+)/);
+  const slackChannel = slackMatch ? slackMatch[1] : null;
+
+  return { techRisk, theme, slackChannel };
 }
 
 /**
@@ -166,7 +171,7 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
 
   for (const relation of relations) {
     const init = relation.relatedInitiative;
-    const { techRisk, theme } = extractPriorityMetadata(init);
+    const { techRisk, theme, slackChannel } = extractPriorityMetadata(init);
     const rank = Math.round(relation.sortOrder);
 
     // Calculate overall progress from linked projects
@@ -191,6 +196,9 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
     }
     if (techRisk) {
       lines.push(`- **Tech Risk**: ${techRisk}`);
+    }
+    if (slackChannel) {
+      lines.push(`- **Slack**: ${slackChannel}`);
     }
     if (init.targetDate) {
       lines.push(`- **Target Date**: ${init.targetDate}`);
