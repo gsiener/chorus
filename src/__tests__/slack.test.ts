@@ -322,6 +322,47 @@ describe("addReaction", () => {
 
     expect(result).toBe(false);
   });
+
+  it("adds both thumbsup and thumbsdown in parallel", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+
+    const [up, down] = await Promise.all([
+      addReaction("C123", "1700000001.000000", "thumbsup", mockEnv),
+      addReaction("C123", "1700000001.000000", "thumbsdown", mockEnv),
+    ]);
+
+    expect(up).toBe(true);
+    expect(down).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const bodies = calls.map((c) => JSON.parse(c[1]?.body as string));
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ name: "thumbsup" })
+    );
+    expect(bodies).toContainEqual(
+      expect.objectContaining({ name: "thumbsdown" })
+    );
+  });
+
+  it("one reaction failing does not prevent the other", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, error: "too_many_reactions" }))
+      );
+
+    const [up, down] = await Promise.all([
+      addReaction("C123", "1700000001.000000", "thumbsup", mockEnv),
+      addReaction("C123", "1700000001.000000", "thumbsdown", mockEnv),
+    ]);
+
+    // One succeeds, one fails, but both complete independently
+    expect(up).toBe(true);
+    expect(down).toBe(false);
+  });
 });
 
 describe("postDirectMessage", () => {

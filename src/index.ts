@@ -1285,9 +1285,14 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const messageUpdateMs = Date.now() - updateStart;
     recordSlackLatency({ messageUpdateMs });
 
-    // Add feedback reactions to the response
-    await addReaction(channel, thinkingTs, "thumbsup", env);
-    await addReaction(channel, thinkingTs, "thumbsdown", env);
+    // Add feedback reactions to the response (parallel to avoid Worker timeout)
+    const [thumbsUpOk, thumbsDownOk] = await Promise.all([
+      addReaction(channel, thinkingTs, "thumbsup", env),
+      addReaction(channel, thinkingTs, "thumbsdown", env),
+    ]);
+    if (!thumbsUpOk || !thumbsDownOk) {
+      console.warn(`Reaction add incomplete: thumbsup=${thumbsUpOk}, thumbsdown=${thumbsDownOk}`);
+    }
 
     // Record comprehensive Claude response context for wide events
     recordClaudeResponse({
