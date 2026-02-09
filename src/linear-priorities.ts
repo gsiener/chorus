@@ -25,6 +25,7 @@ export interface LinearInitiative {
   url: string;
   owner: {
     name: string;
+    email: string;
   } | null;
   content: string | null;
   projects: {
@@ -109,6 +110,7 @@ export async function fetchPriorityInitiatives(
           content
           owner {
             name
+            email
           }
           projects(first: 10) {
             nodes {
@@ -159,7 +161,10 @@ export async function fetchPriorityInitiatives(
 /**
  * Format priority initiatives as context for Claude
  */
-function formatPrioritiesContext(relations: InitiativeRelation[]): string {
+function formatPrioritiesContext(
+  relations: InitiativeRelation[],
+  ownerSlackIds: Map<string, string> = new Map()
+): string {
   if (relations.length === 0) {
     return "";
   }
@@ -189,7 +194,11 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
     lines.push(`### #${rank}: <${init.url}|${init.name}>`);
     lines.push(`- **Status**: ${init.status}`);
     if (init.owner) {
-      lines.push(`- **Owner**: ${init.owner.name}`);
+      const slackId = init.owner.email
+        ? ownerSlackIds.get(init.owner.email.toLowerCase())
+        : undefined;
+      const ownerDisplay = slackId ? `<@${slackId}>` : init.owner.name;
+      lines.push(`- **Owner**: ${ownerDisplay}`);
     }
     if (theme) {
       lines.push(`- **Theme**: ${theme}`);
@@ -218,6 +227,46 @@ function formatPrioritiesContext(relations: InitiativeRelation[]): string {
 }
 
 /**
+ * Resolve Linear owner emails to Slack user IDs
+ */
+async function resolveOwnerSlackIds(
+  relations: InitiativeRelation[],
+  env: Env
+): Promise<Map<string, string>> {
+  const emailToSlackId = new Map<string, string>();
+  const emails = [
+    ...new Set(
+      relations
+        .map((r) => r.relatedInitiative.owner?.email)
+        .filter((e): e is string => !!e)
+    ),
+  ];
+
+  const lookups = await Promise.all(
+    emails.map(async (email) => {
+      try {
+        const res = await fetch(
+          `https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`,
+          { headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } }
+        );
+        const data = (await res.json()) as { ok: boolean; user?: { id: string } };
+        return { email, slackId: data.ok ? data.user?.id ?? null : null };
+      } catch {
+        return { email, slackId: null };
+      }
+    })
+  );
+
+  for (const { email, slackId } of lookups) {
+    if (slackId) {
+      emailToSlackId.set(email.toLowerCase(), slackId);
+    }
+  }
+
+  return emailToSlackId;
+}
+
+/**
  * Clear the priorities cache
  */
 export async function clearPrioritiesCache(env: Env): Promise<void> {
@@ -242,7 +291,8 @@ export async function getPrioritiesContext(env: Env): Promise<string | null> {
       return null;
     }
 
-    const context = formatPrioritiesContext(relations);
+    const ownerSlackIds = await resolveOwnerSlackIds(relations, env);
+    const context = formatPrioritiesContext(relations, ownerSlackIds);
 
     // Cache the result
     await env.DOCS_KV.put(CACHE_KEY, context, {
