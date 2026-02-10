@@ -130,6 +130,8 @@ export function recordGenAiMetrics(metrics: {
     "gen_ai.operation.name": metrics.operationName,
     // gen_ai.system is the canonical identifier (replaces provider.name)
     "gen_ai.system": metrics.system ?? GEN_AI_SYSTEMS.ANTHROPIC,
+    // gen_ai.provider.name for Honeycomb querying alongside gen_ai.system
+    "gen_ai.provider.name": metrics.system ?? GEN_AI_SYSTEMS.ANTHROPIC,
     "gen_ai.request.model": metrics.requestModel,
   });
 
@@ -766,18 +768,28 @@ export function recordCost(estimatedCostUsd: number): void {
 
 /**
  * Record GenAI latency breakdown on the active span
+ * @param latency.streaming - if true, TTFT is from the streaming path; if false, TTFT = total duration
  */
 export function recordGenAiLatency(latency: {
   totalGenerationMs: number;
   timeToFirstTokenMs?: number;
+  streaming?: boolean;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
 
   span.setAttribute("gen_ai.latency.total_generation_ms", latency.totalGenerationMs);
 
+  // Seconds-unit attribute for Honeycomb HEATMAP/P99 queries
+  const durationS = latency.totalGenerationMs / 1000;
+  span.setAttribute("gen_ai.client.operation.duration_s", durationS);
+
   if (latency.timeToFirstTokenMs !== undefined) {
     span.setAttribute("gen_ai.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
+    span.setAttribute("gen_ai.server.time_to_first_token_s", latency.timeToFirstTokenMs / 1000);
+  } else if (latency.streaming === false) {
+    // Non-streaming: TTFT ≈ total duration (server returns all at once)
+    span.setAttribute("gen_ai.server.time_to_first_token_s", durationS);
   }
 }
 

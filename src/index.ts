@@ -48,6 +48,7 @@ import {
   recordRateLimit,
   recordSlackLatency,
 } from "./telemetry";
+import { initGenAiMetrics, flushGenAiMetrics, clearGenAiMetrics } from "./genai-metrics";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 import {
   STATUS_EMOJIS,
@@ -771,6 +772,18 @@ export const handler = {
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Initialize GenAI histogram metrics for this request
+    try {
+      initGenAiMetrics(env);
+    } catch (e) {
+      console.error("Failed to init GenAI metrics:", e);
+    }
+
+    // Ensure metrics are flushed at end of request (and state cleared)
+    ctx.waitUntil(
+      flushGenAiMetrics().finally(() => clearGenAiMetrics())
+    );
+
     const url = new URL(request.url);
 
     // Route /api/docs to the docs API handler

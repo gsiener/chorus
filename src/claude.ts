@@ -16,6 +16,12 @@ import {
   recordKnowledgeBaseMetrics,
 } from "./telemetry";
 import {
+  recordOperationDuration,
+  recordTokenUsage,
+  recordTimeToFirstToken,
+  type GenAiMetricAttributes,
+} from "./genai-metrics";
+import {
   getThreadContext,
   updateThreadContext,
   processMessagesForContext,
@@ -243,13 +249,21 @@ ${prioritiesContext}`;
   if (!response.ok) {
     const error = await response.text();
     console.error("Claude API error:", error);
+    // Record duration on error path
+    recordOperationDuration(apiLatencyMs / 1000, {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.request.model": CLAUDE_MODEL,
+      "gen_ai.provider.name": "anthropic",
+      "server.address": "api.anthropic.com",
+      "error.type": `HTTP ${response.status}`,
+    });
     throw new Error(`Claude API error: ${response.status}`);
   }
 
   const data = (await response.json()) as ClaudeResponse;
 
-  // Record latency
-  recordGenAiLatency({ totalGenerationMs: apiLatencyMs });
+  // Record latency (non-streaming: TTFT ≈ total)
+  recordGenAiLatency({ totalGenerationMs: apiLatencyMs, streaming: false });
 
   const rawText = data.content[0]?.text ?? "Sorry, I couldn't generate a response.";
   const text = convertToSlackFormat(rawText);
@@ -278,6 +292,20 @@ ${prioritiesContext}`;
     cacheCreationInputTokens: data.usage?.cache_creation_input_tokens,
     cacheReadInputTokens: data.usage?.cache_read_input_tokens,
   });
+
+  // Record OTel histogram metrics (non-streaming)
+  const metricAttrs: GenAiMetricAttributes = {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.request.model": CLAUDE_MODEL,
+    "gen_ai.response.model": data.model,
+    "gen_ai.provider.name": "anthropic",
+    "server.address": "api.anthropic.com",
+  };
+  recordOperationDuration(apiLatencyMs / 1000, metricAttrs);
+  recordTokenUsage(inputTokens, "input", metricAttrs);
+  recordTokenUsage(outputTokens, "output", metricAttrs);
+  // Non-streaming: TTFT ≈ total duration
+  recordTimeToFirstToken(apiLatencyMs / 1000, metricAttrs);
 
   // Record completion output (input was already recorded before API call)
   recordGenAiOutput(rawText);
@@ -466,10 +494,11 @@ ${prioritiesContext}`;
   const text = convertToSlackFormat(fullText);
   const apiLatencyMs = Date.now() - apiStartTime;
 
-  // Record latency breakdown
+  // Record latency breakdown (streaming)
   recordGenAiLatency({
     totalGenerationMs: apiLatencyMs,
     timeToFirstTokenMs,
+    streaming: true,
   });
 
   // Calculate and record cost
@@ -487,6 +516,20 @@ ${prioritiesContext}`;
     streaming: true,
     cacheHit: false,
   });
+
+  // Record OTel histogram metrics (streaming)
+  const streamMetricAttrs: GenAiMetricAttributes = {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.request.model": CLAUDE_MODEL,
+    "gen_ai.provider.name": "anthropic",
+    "server.address": "api.anthropic.com",
+  };
+  recordOperationDuration(apiLatencyMs / 1000, streamMetricAttrs);
+  recordTokenUsage(inputTokens, "input", streamMetricAttrs);
+  recordTokenUsage(outputTokens, "output", streamMetricAttrs);
+  if (timeToFirstTokenMs !== undefined) {
+    recordTimeToFirstToken(timeToFirstTokenMs / 1000, streamMetricAttrs);
+  }
 
   // Record completion output (input was already recorded before API call)
   recordGenAiOutput(fullText);

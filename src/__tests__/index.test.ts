@@ -16,6 +16,13 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
   instrument: (handler: unknown) => handler,
 }));
 
+// Mock genai-metrics to avoid @opentelemetry/core importing createContextKey from mocked @opentelemetry/api
+vi.mock("../genai-metrics", () => ({
+  initGenAiMetrics: () => {},
+  flushGenAiMetrics: () => Promise.resolve(),
+  clearGenAiMetrics: () => {},
+}));
+
 import { handler, resetBotUserIdCache } from "../index";
 import type { Env } from "../types";
 
@@ -153,7 +160,8 @@ describe("Worker", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("OK");
-    expect(mockCtx.waitUntil).not.toHaveBeenCalled();
+    // waitUntil is called once for metrics flush, but no background processing
+    expect(mockCtx.waitUntil).toHaveBeenCalledTimes(1);
   });
 
   it("handles help command and triggers background processing", async () => {
