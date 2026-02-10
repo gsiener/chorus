@@ -26,7 +26,6 @@ import type {
 } from "@opentelemetry/sdk-metrics";
 import { ExportResultCode } from "@opentelemetry/core";
 import type { ExportResult } from "@opentelemetry/core";
-import { resourceFromAttributes } from "@opentelemetry/resources";
 import { JsonMetricsSerializer } from "@opentelemetry/otlp-transformer";
 import type { Histogram, Attributes } from "@opentelemetry/api";
 
@@ -181,7 +180,6 @@ export function initGenAiMetrics(env: { HONEYCOMB_API_KEY: string }): void {
   const reader = new ManualFlushMetricReader(exporter);
 
   const meterProvider = new MeterProvider({
-    resource: resourceFromAttributes({ "service.name": "chorus" }),
     readers: [reader],
     views: [
       {

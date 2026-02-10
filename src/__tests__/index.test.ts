@@ -160,8 +160,7 @@ describe("Worker", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("OK");
-    // waitUntil is called once for metrics flush, but no background processing
-    expect(mockCtx.waitUntil).toHaveBeenCalledTimes(1);
+    expect(mockCtx.waitUntil).not.toHaveBeenCalled();
   });
 
   it("handles help command and triggers background processing", async () => {

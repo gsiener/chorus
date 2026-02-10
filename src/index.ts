@@ -779,11 +779,6 @@ export const handler = {
       console.error("Failed to init GenAI metrics:", e);
     }
 
-    // Ensure metrics are flushed at end of request (and state cleared)
-    ctx.waitUntil(
-      flushGenAiMetrics().finally(() => clearGenAiMetrics())
-    );
-
     const url = new URL(request.url);
 
     // Route /api/docs to the docs API handler
@@ -864,7 +859,11 @@ export const handler = {
 
       if (event.type === "app_mention") {
         // Acknowledge immediately, process in background
-        ctx.waitUntil(handleMention(payload, env));
+        ctx.waitUntil(
+          handleMention(payload, env)
+            .finally(() => flushGenAiMetrics())
+            .finally(() => clearGenAiMetrics())
+        );
         return new Response("OK", { status: 200 });
       }
 
