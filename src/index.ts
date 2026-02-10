@@ -31,7 +31,7 @@ import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
 import { syncLinearProjects, checkAndSyncIfNeeded } from "./linear";
 import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./checkins";
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
-import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport } from "./amplitude";
+import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport, warmAmplitudeCache } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
@@ -762,6 +762,7 @@ export const handler = {
 
       await checkAndSyncIfNeeded(env);
       await backfillIfNeeded(env);
+      await warmAmplitudeCache(env);
     })());
   },
 

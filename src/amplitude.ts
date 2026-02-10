@@ -947,6 +947,22 @@ export async function getAmplitudeContext(
 }
 
 /**
+ * Warm the Amplitude cache (called from daily cron).
+ * Refreshes stale/missing data so the mention path always has context.
+ */
+export async function warmAmplitudeCache(env: Env): Promise<void> {
+  if (!env.AMPLITUDE_API_KEY || !env.AMPLITUDE_API_SECRET) {
+    return;
+  }
+  try {
+    await getOrRefreshMetrics(env);
+    console.log("Amplitude cache warmed");
+  } catch (error) {
+    console.error("Failed to warm Amplitude cache:", error);
+  }
+}
+
+/**
  * Fetch raw metrics (for debug endpoint)
  */
 export async function getAmplitudeMetrics(
