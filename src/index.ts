@@ -48,7 +48,6 @@ import {
   recordRateLimit,
   recordSlackLatency,
 } from "./telemetry";
-import { initGenAiMetrics, flushGenAiMetrics, clearGenAiMetrics } from "./genai-metrics";
 import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 import {
   STATUS_EMOJIS,
@@ -745,40 +744,28 @@ export const handler = {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log("Running scheduled tasks at", new Date(controller.scheduledTime).toISOString());
 
-    // Run weekly check-ins
-    ctx.waitUntil(sendWeeklyCheckins(env));
+    // Run tasks sequentially in a single waitUntil to avoid exceeding Worker CPU limits.
+    // Previously, parallel ctx.waitUntil() calls caused exceededCpu kills.
+    ctx.waitUntil((async () => {
+      await sendWeeklyCheckins(env);
 
-    // Send weekly product metrics report on Mondays
-    if (new Date(controller.scheduledTime).getUTCDay() === 1) {
-      ctx.waitUntil(sendWeeklyMetricsReport(env));
-    }
+      if (new Date(controller.scheduledTime).getUTCDay() === 1) {
+        await sendWeeklyMetricsReport(env);
+      }
 
-    // Run brief checker
-    ctx.waitUntil(
-      checkInitiativeBriefs(env).then((result) => {
-        console.log(
-          `Brief check complete: ${result.initiativesChecked} checked, ` +
-            `${result.missingBriefs.filter((m) => m.dmSent).length} DMs sent, ` +
-            `${result.unmappedUsers.length} unmapped users`
-        );
-      })
-    );
+      const briefResult = await checkInitiativeBriefs(env);
+      console.log(
+        `Brief check complete: ${briefResult.initiativesChecked} checked, ` +
+          `${briefResult.missingBriefs.filter((m) => m.dmSent).length} DMs sent, ` +
+          `${briefResult.unmappedUsers.length} unmapped users`
+      );
 
-    // Run scheduled Linear sync (if interval elapsed)
-    ctx.waitUntil(checkAndSyncIfNeeded(env));
-
-    // Run scheduled document backfill (if interval elapsed)
-    ctx.waitUntil(backfillIfNeeded(env));
+      await checkAndSyncIfNeeded(env);
+      await backfillIfNeeded(env);
+    })());
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Initialize GenAI histogram metrics for this request
-    try {
-      initGenAiMetrics(env);
-    } catch (e) {
-      console.error("Failed to init GenAI metrics:", e);
-    }
-
     const url = new URL(request.url);
 
     // Route /api/docs to the docs API handler
@@ -859,11 +846,7 @@ export const handler = {
 
       if (event.type === "app_mention") {
         // Acknowledge immediately, process in background
-        ctx.waitUntil(
-          handleMention(payload, env)
-            .finally(() => flushGenAiMetrics())
-            .finally(() => clearGenAiMetrics())
-        );
+        ctx.waitUntil(handleMention(payload, env));
         return new Response("OK", { status: 200 });
       }
 
@@ -1250,14 +1233,18 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     let threadFetchMs: number | undefined;
 
     if (thread_ts) {
-      // Fetch existing thread history with timing
+      // Fetch thread history and post thinking message in parallel
       const threadFetchStart = Date.now();
-      const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
+      const [threadMessages, thinkingResult] = await Promise.all([
+        fetchThreadMessages(channel, thread_ts, env),
+        postMessage(channel, "✨ Thinking...", threadTs, env),
+      ]);
       threadFetchMs = Date.now() - threadFetchStart;
       recordSlackLatency({ threadFetchMs });
 
       messages = convertThreadToMessages(threadMessages, botUserId);
       threadMessageCount = threadMessages.length;
+      thinkingTs = thinkingResult;
 
       // Record thread context for observability
       const userMessages = threadMessages.filter(m => m.user !== botUserId).length;
@@ -1275,13 +1262,8 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
           content: cleanedText,
         },
       ];
+      thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
     }
-
-    // Post a "thinking" message with timing
-    const postStart = Date.now();
-    thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
-    const messagePostMs = Date.now() - postStart;
-    recordSlackLatency({ messagePostMs });
 
     if (!thinkingTs) {
       throw new Error("Failed to post thinking message");
@@ -1297,14 +1279,11 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     const messageUpdateMs = Date.now() - updateStart;
     recordSlackLatency({ messageUpdateMs });
 
-    // Add feedback reactions to the response (parallel to avoid Worker timeout)
-    const [thumbsUpOk, thumbsDownOk] = await Promise.all([
+    // Add feedback reactions (fire-and-forget — user already sees the response)
+    Promise.all([
       addReaction(channel, thinkingTs, "thumbsup", env),
       addReaction(channel, thinkingTs, "thumbsdown", env),
-    ]);
-    if (!thumbsUpOk || !thumbsDownOk) {
-      console.warn(`Reaction add incomplete: thumbsup=${thumbsUpOk}, thumbsdown=${thumbsDownOk}`);
-    }
+    ]).catch(err => console.warn("Reaction add failed:", err));
 
     // Record comprehensive Claude response context for wide events
     recordClaudeResponse({

@@ -734,6 +734,8 @@ const CLAUDE_PRICING: Record<string, { input: number; output: number }> = {
   "claude-3-opus-20240229": { input: 15.0, output: 75.0 },
   // Claude Opus 4.5
   "claude-opus-4-5-20251101": { input: 15.0, output: 75.0 },
+  // Claude Sonnet 4.5
+  "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
   // Default fallback (assume Opus pricing as safe upper bound)
   default: { input: 15.0, output: 75.0 },
 };

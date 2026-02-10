@@ -146,27 +146,28 @@ export async function updateThreadContext(
   threadTs: string,
   messages: ClaudeMessage[],
   initiativesMentioned: string[],
-  env: Env
+  env: Env,
+  existingContext?: ThreadContext | null,
 ): Promise<void> {
-  const existingContext = await getThreadContext(channel, threadTs, env);
+  const resolved = existingContext ?? await getThreadContext(channel, threadTs, env);
 
   // Extract topics from all messages
   const keyTopics = extractKeyTopics(messages);
 
   // Merge with existing topics
   const allTopics = new Set([
-    ...(existingContext?.keyTopics || []),
+    ...(resolved?.keyTopics || []),
     ...keyTopics,
   ]);
 
   // Merge initiatives mentioned
   const allInitiatives = new Set([
-    ...(existingContext?.initiativesMentioned || []),
+    ...(resolved?.initiativesMentioned || []),
     ...initiativesMentioned,
   ]);
 
   // Generate summary if thread is long enough
-  let summary = existingContext?.summary;
+  let summary = resolved?.summary;
   if (messages.length >= SUMMARIZATION_THRESHOLD) {
     const splitPoint = messages.length - RECENT_MESSAGES_TO_KEEP;
     summary = generateSimpleSummary(messages.slice(0, splitPoint));

@@ -16,12 +16,6 @@ import {
   recordKnowledgeBaseMetrics,
 } from "./telemetry";
 import {
-  recordOperationDuration,
-  recordTokenUsage,
-  recordTimeToFirstToken,
-  type GenAiMetricAttributes,
-} from "./genai-metrics";
-import {
   getThreadContext,
   updateThreadContext,
   processMessagesForContext,
@@ -73,8 +67,8 @@ function cleanSlackMessage(text: string, botUserId: string): string {
     .trim();
 }
 
-export const CLAUDE_MODEL = "claude-opus-4-5-20251101";
-const CLAUDE_MAX_TOKENS = 1024;
+export const CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
+const CLAUDE_MAX_TOKENS = 300;
 // Timeout for Claude API calls - leave margin before Cloudflare's 30s waitUntil limit
 const CLAUDE_API_TIMEOUT_MS = 25000;
 
@@ -140,22 +134,11 @@ export async function generateResponse(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   const query = lastUserMessage?.content || "";
 
-  // Get thread context if we're in a thread
-  let threadContext = null;
-  if (threadInfo) {
-    threadContext = await getThreadContext(threadInfo.channel, threadInfo.threadTs, env);
-  }
-
-  // Process messages with thread context (summarize if long)
-  const { messages: processedMessages, contextPrefix, wasTruncated } = processMessagesForContext(
-    messages,
-    threadContext
-  );
-
-  // Load full knowledge base, priorities, gaps, and user info in parallel
+  // Load thread context, knowledge base, priorities, gaps, and user info in parallel
   // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [knowledgeBase, prioritiesContext, amplitudeContext, gapNudge, userInfo] = await Promise.all([
+  const [threadContext, knowledgeBase, prioritiesContext, amplitudeContext, gapNudge, userInfo] = await Promise.all([
+    threadInfo ? getThreadContext(threadInfo.channel, threadInfo.threadTs, env) : Promise.resolve(null),
     getKnowledgeBase(env),
     getPrioritiesContext(env),
     getAmplitudeContext(env),
@@ -163,6 +146,12 @@ export async function generateResponse(
     userId ? fetchUserInfo(userId, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
+
+  // Process messages with thread context (summarize if long)
+  const { messages: processedMessages, contextPrefix, wasTruncated } = processMessagesForContext(
+    messages,
+    threadContext
+  );
 
   // Record knowledge base metrics
   const kbDocCount = knowledgeBase ? (knowledgeBase.match(/^## /gm) || []).length : 0;
@@ -242,21 +231,13 @@ ${prioritiesContext}`;
         messages: processedMessages,
       }),
     },
-    { initialDelayMs: 1000, timeoutMs: CLAUDE_API_TIMEOUT_MS }
+    { maxRetries: 1, initialDelayMs: 1000, timeoutMs: CLAUDE_API_TIMEOUT_MS }
   );
   const apiLatencyMs = Date.now() - apiStartTime;
 
   if (!response.ok) {
     const error = await response.text();
     console.error("Claude API error:", error);
-    // Record duration on error path
-    recordOperationDuration(apiLatencyMs / 1000, {
-      "gen_ai.operation.name": "chat",
-      "gen_ai.request.model": CLAUDE_MODEL,
-      "gen_ai.provider.name": "anthropic",
-      "server.address": "api.anthropic.com",
-      "error.type": `HTTP ${response.status}`,
-    });
     throw new Error(`Claude API error: ${response.status}`);
   }
 
@@ -293,20 +274,6 @@ ${prioritiesContext}`;
     cacheReadInputTokens: data.usage?.cache_read_input_tokens,
   });
 
-  // Record OTel histogram metrics (non-streaming)
-  const metricAttrs: GenAiMetricAttributes = {
-    "gen_ai.operation.name": "chat",
-    "gen_ai.request.model": CLAUDE_MODEL,
-    "gen_ai.response.model": data.model,
-    "gen_ai.provider.name": "anthropic",
-    "server.address": "api.anthropic.com",
-  };
-  recordOperationDuration(apiLatencyMs / 1000, metricAttrs);
-  recordTokenUsage(inputTokens, "input", metricAttrs);
-  recordTokenUsage(outputTokens, "output", metricAttrs);
-  // Non-streaming: TTFT ≈ total duration
-  recordTimeToFirstToken(apiLatencyMs / 1000, metricAttrs);
-
   // Record completion output (input was already recorded before API call)
   recordGenAiOutput(rawText);
 
@@ -322,7 +289,8 @@ ${prioritiesContext}`;
       threadInfo.threadTs,
       messages,
       [], // Initiative mentions extracted separately if needed
-      env
+      env,
+      threadContext,
     ).catch(err => console.error("Failed to update thread context:", err));
   }
 
@@ -516,20 +484,6 @@ ${prioritiesContext}`;
     streaming: true,
     cacheHit: false,
   });
-
-  // Record OTel histogram metrics (streaming)
-  const streamMetricAttrs: GenAiMetricAttributes = {
-    "gen_ai.operation.name": "chat",
-    "gen_ai.request.model": CLAUDE_MODEL,
-    "gen_ai.provider.name": "anthropic",
-    "server.address": "api.anthropic.com",
-  };
-  recordOperationDuration(apiLatencyMs / 1000, streamMetricAttrs);
-  recordTokenUsage(inputTokens, "input", streamMetricAttrs);
-  recordTokenUsage(outputTokens, "output", streamMetricAttrs);
-  if (timeToFirstTokenMs !== undefined) {
-    recordTimeToFirstToken(timeToFirstTokenMs / 1000, streamMetricAttrs);
-  }
 
   // Record completion output (input was already recorded before API call)
   recordGenAiOutput(fullText);

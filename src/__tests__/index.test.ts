@@ -16,13 +16,6 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
   instrument: (handler: unknown) => handler,
 }));
 
-// Mock genai-metrics to avoid @opentelemetry/core importing createContextKey from mocked @opentelemetry/api
-vi.mock("../genai-metrics", () => ({
-  initGenAiMetrics: () => {},
-  flushGenAiMetrics: () => Promise.resolve(),
-  clearGenAiMetrics: () => {},
-}));
-
 import { handler, resetBotUserIdCache } from "../index";
 import type { Env } from "../types";
 

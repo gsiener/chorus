@@ -14,7 +14,7 @@ const RD_PRIORITIES_INITIATIVE_ID = "6aaaa863-a398-4116-ab4f-830606ce4744";
 
 // Cache configuration
 const CACHE_KEY = "linear:priorities:context";
-const CACHE_TTL_SECONDS = 300; // 5 minutes
+const CACHE_TTL_SECONDS = 900; // 15 minutes
 
 export interface LinearInitiative {
   id: string;

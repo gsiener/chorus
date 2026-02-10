@@ -49,7 +49,7 @@ export async function verifySlackSignature(
     }
 
     const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - parseInt(timestamp)) > 5) {
+    if (Math.abs(now - parseInt(timestamp)) > 300) {
       return false;
     }
 

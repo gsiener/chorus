@@ -165,7 +165,7 @@ async function fetchWithRetry<T>(
       return await fn();
     } catch (error) {
       const isRetryable = error instanceof Error &&
-        (error.message.includes("429") || error.message.includes("5"));
+        (error.message.includes("429") || error.message.includes("500") || error.message.includes("502") || error.message.includes("503"));
       if (!isRetryable || attempt === MAX_RETRIES) throw error;
       const delayMs = RETRY_BASE_MS * Math.pow(2, attempt);
       console.warn(`Amplitude ${label} retry ${attempt + 1}/${MAX_RETRIES} after ${delayMs}ms`);
@@ -857,13 +857,22 @@ function isCacheFresh(data: AmplitudeMetrics): boolean {
  * Stale-while-revalidate: fetch fresh data if cache is stale,
  * but prevent multiple concurrent refreshes (stampede protection).
  * Returns cached data (even stale) if another request is already refreshing.
+ *
+ * When cacheOnly is true, returns cached data (even stale) without triggering a refresh.
+ * This prevents 429 rate limiting when called from the hot mention path.
  */
-async function getOrRefreshMetrics(env: Env): Promise<AmplitudeMetrics | null> {
+async function getOrRefreshMetrics(env: Env, cacheOnly = false): Promise<AmplitudeMetrics | null> {
   const cached = await env.DOCS_KV.get(CACHE_KEY);
   if (cached) {
     try {
       const data = JSON.parse(cached) as AmplitudeMetrics;
       if (isCacheFresh(data)) return data;
+
+      // In cache-only mode, return stale data rather than triggering a refresh
+      if (cacheOnly) {
+        console.log("Amplitude cache stale, returning stale (cache-only mode)");
+        return data;
+      }
 
       // Stale — check if someone else is already refreshing
       const isRefreshing = await env.DOCS_KV.get(CACHE_LOCK_KEY);
@@ -888,7 +897,13 @@ async function getOrRefreshMetrics(env: Env): Promise<AmplitudeMetrics | null> {
     }
   }
 
-  // No cache at all — acquire lock and fetch
+  // No cache at all
+  if (cacheOnly) {
+    console.log("Amplitude cache empty, returning null (cache-only mode)");
+    return null;
+  }
+
+  // Acquire lock and fetch
   const isRefreshing = await env.DOCS_KV.get(CACHE_LOCK_KEY);
   if (isRefreshing) {
     console.log("Amplitude cache empty but refresh in progress, returning null");
@@ -908,10 +923,14 @@ async function getOrRefreshMetrics(env: Env): Promise<AmplitudeMetrics | null> {
 }
 
 /**
- * Get Amplitude metrics context for Claude, with caching
+ * Get Amplitude metrics context for Claude, with caching.
+ * Uses cache-only mode by default to avoid blocking the mention path with
+ * 19+ Amplitude API calls that can trigger 429 rate limiting.
+ * The cron job is responsible for keeping the cache warm.
  */
 export async function getAmplitudeContext(
   env: Env,
+  { allowRefresh = false } = {},
 ): Promise<string | null> {
   if (!env.AMPLITUDE_API_KEY || !env.AMPLITUDE_API_SECRET) {
     console.log("Amplitude API credentials not configured, skipping metrics");
@@ -919,7 +938,7 @@ export async function getAmplitudeContext(
   }
 
   try {
-    const data = await getOrRefreshMetrics(env);
+    const data = await getOrRefreshMetrics(env, !allowRefresh);
     return data ? formatMetricsForClaude(data) : null;
   } catch (error) {
     console.error("Failed to fetch Amplitude metrics:", error);

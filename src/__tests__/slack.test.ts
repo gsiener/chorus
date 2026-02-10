@@ -87,6 +87,23 @@ describe("verifySlackSignature", () => {
     expect(result).toBe(false);
   });
 
+  it("accepts signature within 5-minute window (Slack retries)", async () => {
+    const body = '{"test": "data"}';
+    const retryTimestamp = (Math.floor(Date.now() / 1000) - 60).toString(); // 60 seconds ago
+    const signature = await createValidSignature(body, retryTimestamp);
+
+    const request = new Request("https://example.com", {
+      method: "POST",
+      headers: {
+        "x-slack-request-timestamp": retryTimestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    const result = await verifySlackSignature(request, body, signingSecret);
+    expect(result).toBe(true);
+  });
+
   it("returns false for invalid signature", async () => {
     const timestamp = Math.floor(Date.now() / 1000).toString();
 
