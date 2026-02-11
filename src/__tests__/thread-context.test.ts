@@ -42,7 +42,6 @@ describe("Thread Context", () => {
         channel: "C123",
         summary: "Test summary",
         keyTopics: ["topic1", "topic2"],
-        initiativesMentioned: [],
         messageCount: 5,
         lastUpdatedAt: "2024-01-01T00:00:00Z",
       };
@@ -60,7 +59,6 @@ describe("Thread Context", () => {
         channel: "C123",
         summary: "Test summary",
         keyTopics: [],
-        initiativesMentioned: [],
         messageCount: 3,
         lastUpdatedAt: "2024-01-01T00:00:00Z",
       };
@@ -140,7 +138,6 @@ describe("Thread Context", () => {
         channel: "C123",
         summary: "Existing summary from previous context",
         keyTopics: ["existing topic"],
-        initiativesMentioned: [],
         messageCount: 20,
         lastUpdatedAt: "2024-01-01",
       };
@@ -158,7 +155,7 @@ describe("Thread Context", () => {
         { role: "assistant", content: "The Product Launch is going well." },
       ];
 
-      await updateThreadContext("C123", "1234.5678", messages, ["product-launch"], mockEnv);
+      await updateThreadContext("C123", "1234.5678", messages, mockEnv);
 
       const stored = mockKvStore["thread:context:C123:1234.5678"];
       expect(stored).toBeDefined();
@@ -167,7 +164,6 @@ describe("Thread Context", () => {
       expect(context.channel).toBe("C123");
       expect(context.threadTs).toBe("1234.5678");
       expect(context.messageCount).toBe(2);
-      expect(context.initiativesMentioned).toContain("product-launch");
       expect(context.keyTopics).toContain("Product Launch");
     });
 
@@ -176,7 +172,6 @@ describe("Thread Context", () => {
         threadTs: "1234.5678",
         channel: "C123",
         keyTopics: ["old topic"],
-        initiativesMentioned: ["old-initiative"],
         messageCount: 3,
         lastUpdatedAt: "2024-01-01",
       };
@@ -187,11 +182,9 @@ describe("Thread Context", () => {
         { role: "assistant", content: "Let me explain." },
       ];
 
-      await updateThreadContext("C123", "1234.5678", messages, ["new-initiative"], mockEnv);
+      await updateThreadContext("C123", "1234.5678", messages, mockEnv);
 
       const stored = JSON.parse(mockKvStore["thread:context:C123:1234.5678"]) as ThreadContext;
-      expect(stored.initiativesMentioned).toContain("old-initiative");
-      expect(stored.initiativesMentioned).toContain("new-initiative");
       expect(stored.keyTopics).toContain("old topic");
       expect(stored.keyTopics).toContain("New Topic");
     });

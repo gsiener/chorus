@@ -75,6 +75,12 @@ npx wrangler secret put HONEYCOMB_API_KEY
 
 npx wrangler secret put DOCS_API_KEY
 # Create a secure API key for console-based document management
+
+npx wrangler secret put COMPANY_NAME
+# Your company name (used in system prompt context)
+
+npx wrangler secret put RD_PRIORITIES_INITIATIVE_ID
+# Linear parent initiative ID for R&D Priorities
 ```
 
 ## 4. Configure Slack Event Subscriptions

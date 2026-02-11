@@ -44,13 +44,11 @@ chorus/
 │   ├── claude.ts          # Claude API integration
 │   ├── docs.ts            # Document management
 │   ├── embeddings.ts      # Semantic search
-│   ├── initiatives.ts     # Initiative tracking
 │   ├── thread-context.ts  # Conversation memory
 │   ├── checkins.ts        # Weekly DM check-ins
-│   ├── linear.ts          # Linear project sync
+│   ├── linear-priorities.ts # R&D Priorities from Linear
 │   ├── files.ts           # File extraction
 │   ├── parseCommands.ts   # Command parsing
-│   ├── initiative-nlp.ts  # Natural language commands
 │   ├── telemetry.ts       # OpenTelemetry instrumentation
 │   ├── http-utils.ts      # HTTP retry/error handling
 │   ├── soul.md            # System prompt (AI personality)
@@ -104,8 +102,7 @@ chorus/
 │  ┌─────────────────┐  ┌──────────────────┐  │               │
 │  │  Cloudflare KV  │  │ Vectorize Index  │  │               │
 │  │  - Documents    │  │ - Embeddings     │  │               │
-│  │  - Initiatives  │  │ - Chunk vectors  │  │               │
-│  │  - Context      │  │                  │  │               │
+│  │  - Context      │  │ - Chunk vectors  │  │               │
 │  │  - Cache        │  │                  │  │               │
 │  └─────────────────┘  └──────────────────┘  │               │
 └─────────────────────────────────────────────┘               │
@@ -164,12 +161,9 @@ The worker handles four types of requests:
    ├─► Check for special commands:
    │   ├─ help, surprise me
    │   ├─ search <query>
-   │   ├─ docs (add/remove/list)
-   │   └─ initiatives (CRUD)
+   │   └─ docs (add/remove/list)
    │
    ├─► If file upload: extract content, add as document
-   │
-   ├─► If NLP initiative command: process via initiative-nlp.ts
    │
    └─► Otherwise: Generate AI response
        │
@@ -177,9 +171,8 @@ The worker handles four types of requests:
        ├─► Load thread context (for summarization)
        ├─► Build Claude prompt:
        │   ├─ System prompt (soul.md)
+       │   ├─ R&D Priorities (from Linear)
        │   ├─ Knowledge base
-       │   ├─ Active initiatives
-       │   ├─ Gap nudges
        │   └─ Conversation messages
        ├─► Call Claude API (25s timeout)
        ├─► Post response to Slack
@@ -194,7 +187,6 @@ POST /slack/slash
         ▼
 ┌───────────────────────────────────────┐
 │ /chorus or /chorus-help → Help text   │
-│ /chorus-initiatives → List initiatives│
 │ /chorus-search <q> → Search KB        │
 │ /chorus-docs → List documents         │
 └───────────────────────────────────────┘
@@ -280,15 +272,11 @@ For each initiative owner:
 │ - Summarized older messages                 │
 │ - Key topics extracted                      │
 ├─────────────────────────────────────────────┤
-│ Active Initiatives Context                  │
-│ - Names, owners, statuses                   │
-│ - PRD links, metrics                        │
+│ R&D Priorities (from Linear)                │
+│ - Strategic initiatives, owners, status     │
 ├─────────────────────────────────────────────┤
 │ Knowledge Base                              │
 │ - All indexed documents                     │
-├─────────────────────────────────────────────┤
-│ Gap Nudges                                  │
-│ - Missing PRDs or metrics warnings          │
 ├─────────────────────────────────────────────┤
 │ User Messages                               │
 │ - Recent messages (full)                    │
@@ -367,41 +355,13 @@ Document → Chunker → Embeddings → Vectorize
 
 ---
 
-### initiatives.ts - Initiative Tracking
+### linear-priorities.ts - R&D Priorities
 
-**Data Model:**
+**Purpose:** Fetch R&D Priorities from Linear and include them in Claude's system prompt.
 
-```typescript
-interface Initiative {
-  id: string;                  // URL-safe identifier
-  name: string;
-  description: string;
-  owner: string;               // Slack user ID
-  status: {
-    value: 'proposed' | 'active' | 'paused' | 'completed' | 'cancelled';
-    updatedAt: string;
-    updatedBy: string;
-  };
-  expectedMetrics: Array<{
-    type: 'gtm' | 'product';
-    name: string;
-    target: string;
-  }>;
-  prdLink?: string;            // Google Docs URL
-  linearProjectId?: string;
-  strategyDocRef?: string;
-  createdAt: string;
-  createdBy: string;
-  updatedAt: string;
-  lastDiscussedAt?: string;
-  tags?: string[];
-}
-```
+**Data Source:** Linear parent initiative linked to child initiatives via `initiativeRelations`.
 
-**Storage Pattern:**
-- **Index:** `initiatives:index` → `{ initiatives: InitiativeMetadata[] }`
-- **Details:** `initiatives:detail:{id}` → `Initiative`
-- **Limit:** 100 initiatives max
+**Cache:** 25-hour TTL in KV (`linear:priorities:context`), warmed daily on cron via `warmPrioritiesCache()`. The mention path reads from cache and falls back to fetching from Linear only on cache miss.
 
 ---
 
@@ -432,23 +392,6 @@ interface Initiative {
 - Missing PRD/metrics warnings
 - Nudges for stale initiatives
 - Action links
-
----
-
-### linear.ts - Linear Integration
-
-**Purpose:** Sync Linear projects as Chorus initiatives.
-
-**State Mapping:**
-
-| Linear State | Initiative Status |
-|--------------|-------------------|
-| started | active |
-| planned | proposed |
-| paused | paused |
-| completed | completed |
-| canceled | cancelled |
-| backlog | proposed |
 
 ---
 
@@ -552,14 +495,11 @@ import {
 |-------------|---------|-----|
 | `docs:index` | Document metadata list | - |
 | `docs:content:{title}` | Document content | - |
-| `initiatives:index` | Initiative metadata list | - |
-| `initiatives:detail:{id}` | Full initiative data | - |
 | `thread:context:{ch}:{ts}` | Thread summaries | 7 days |
 | `cache:response:{hash}` | Claude response cache | 1 hour |
 | `event:{id}` | Event deduplication | 1 minute |
 | `ratelimit:{type}:{user}` | Rate limit counter | 60 seconds |
 | `checkin:last:{user}` | Last check-in time | 14 days |
-| `linear-map:{id}` | Linear → Initiative mapping | - |
 
 ### Cloudflare Vectorize
 
@@ -601,7 +541,7 @@ import {
 ### Linear GraphQL API
 
 - **Endpoint:** `https://api.linear.app/graphql`
-- **Purpose:** Sync projects as initiatives
+- **Purpose:** Fetch R&D Priorities for Claude's system prompt (cached with 25-hour TTL, warmed daily)
 
 ---
 
@@ -711,7 +651,6 @@ npm run deploy  # Runs typecheck, tests, then wrangler deploy
 |-------|-------|
 | Per document | 50 KB |
 | Total KB | 200 KB |
-| Max initiatives | 100 |
 
 ### API Timeouts
 

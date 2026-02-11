@@ -8,6 +8,8 @@ export interface Env {
   AMPLITUDE_API_KEY?: string;
   AMPLITUDE_API_SECRET?: string;
   TEST_CHECKIN_USER?: string; // When set, only send check-ins to this user (for testing)
+  RD_PRIORITIES_INITIATIVE_ID?: string; // Linear parent initiative ID for R&D Priorities
+  COMPANY_NAME?: string; // Company name used in system prompt context (default: "the company")
   DOCS_KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;
@@ -105,54 +107,6 @@ export interface ClaudeResponse {
   };
 }
 
-// Initiative tracking types
-
-export type InitiativeStatusValue = "proposed" | "active" | "paused" | "completed" | "cancelled";
-
-export interface InitiativeStatus {
-  value: InitiativeStatusValue;
-  updatedAt: string;
-  updatedBy: string;
-}
-
-export interface ExpectedMetric {
-  type: "gtm" | "product";
-  name: string;       // e.g., "DAU", "Revenue", "Retention"
-  target: string;     // e.g., "Increase by 10%", "$500K ARR"
-}
-
-export interface Initiative {
-  id: string;
-  name: string;
-  description: string;
-  owner: string;              // Slack user ID
-  status: InitiativeStatus;
-  expectedMetrics: ExpectedMetric[];
-  prdLink?: string;           // Google Docs URL
-  linearProjectId?: string;   // For Linear sync
-  strategyDocRef?: string;    // Reference to a doc in knowledge base
-  createdAt: string;
-  createdBy: string;
-  updatedAt: string;
-  lastDiscussedAt?: string;   // For nudge detection
-  tags?: string[];            // Freeform categorization
-}
-
-export interface InitiativeMetadata {
-  id: string;
-  name: string;
-  owner: string;
-  status: InitiativeStatusValue;
-  hasMetrics: boolean;
-  hasPrd: boolean;
-  updatedAt: string;
-}
-
-export interface InitiativeIndex {
-  initiatives: InitiativeMetadata[];
-  lastSyncedWithLinear?: string;
-}
-
 // Thread context types for conversation memory
 
 export interface ThreadContext {
@@ -160,7 +114,6 @@ export interface ThreadContext {
   channel: string;             // Channel ID
   summary?: string;            // Summary of earlier conversation
   keyTopics: string[];         // Key topics/entities mentioned
-  initiativesMentioned: string[]; // Initiative IDs discussed
   messageCount: number;        // Total messages in thread
   lastUpdatedAt: string;       // When context was last updated
 }

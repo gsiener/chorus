@@ -27,9 +27,9 @@ resolution_type: cache-aside with TTL-based expiration and write-through invalid
 Every `@mention` to Chorus triggered excessive reads:
 
 1. **Knowledge Base assembly** — `getKnowledgeBase()` read the docs index + every individual document from KV (N+1 pattern). A 10-doc KB meant ~11 KV reads per mention.
-2. **Initiative index** — `getIndex()` re-read and re-parsed the initiatives JSON on every call (listing, gap detection, context generation).
+2. **Initiative index** — `getIndex()` re-read and re-parsed the initiatives JSON on every call (listing, gap detection, context generation). *(Entire initiative KV store removed Feb 2026)*
 3. **Amplitude metrics** — `sendWeeklyMetricsReport()` and `sendTestMetricsReport()` called `fetchAllMetrics()` directly, making ~22 parallel Amplitude API requests. Back-to-back triggers caused 429 rate limit errors.
-4. **Linear projects** — `fetchLinearProjects()` hit the GraphQL API on every sync, even when synced recently.
+4. **Linear projects** — `fetchLinearProjects()` hit the GraphQL API on every sync, even when synced recently. *(Linear sync removed Feb 2026; R&D Priorities now fetched via `linear-priorities.ts`)*
 
 ## Root Cause
 
@@ -44,9 +44,9 @@ Applied the **cache-aside pattern** consistently across four modules, with centr
 ```typescript
 export const KB_CACHE_TTL_SECONDS = 600;              // 10 minutes
 export const AMPLITUDE_CACHE_TTL_SECONDS = 3600;      // 1 hour (data is weekly)
-export const LINEAR_PROJECTS_CACHE_TTL_SECONDS = 1800; // 30 minutes
-export const INITIATIVES_CACHE_TTL_SECONDS = 300;      // 5 minutes
 ```
+
+> **Note (Feb 2026):** `LINEAR_PROJECTS_CACHE_TTL_SECONDS` and `INITIATIVES_CACHE_TTL_SECONDS` were removed when the KV initiative store was deleted. R&D Priorities now come from `linear-priorities.ts` with its own 5-minute cache.
 
 ### Cache-Aside Pattern (applied in all four modules)
 
@@ -71,9 +71,9 @@ return data;
 | Module | Cache Key | TTL | Invalidation |
 |--------|-----------|-----|--------------|
 | `docs.ts` | `cache:kb:assembled` | 10 min | Delete on add/update/remove |
-| `initiatives.ts` | `cache:initiatives:index` | 5 min | Delete on `saveIndex()` |
-| `linear.ts` | `cache:linear:projects` | 30 min | TTL expiration only |
 | `amplitude.ts` | `amplitude:metrics:weekly` | 1 hour | TTL expiration only |
+
+> **Note (Feb 2026):** `initiatives.ts` and `linear.ts` cache entries were removed with the KV initiative store deletion.
 
 **Rule of thumb**: Mutable internal data gets explicit invalidation on writes. External API data relies on TTL expiration.
 
@@ -110,8 +110,8 @@ Previously `sendWeeklyMetricsReport` and `sendTestMetricsReport` each called `fe
 
 All cache keys follow `cache:<domain>:<resource>`:
 - `cache:kb:assembled`
-- `cache:initiatives:index`
-- `cache:linear:projects`
+
+> **Note (Feb 2026):** `cache:initiatives:index` and `cache:linear:projects` were removed with the KV initiative store deletion.
 
 Exception: `amplitude:metrics:weekly` predates the convention and was kept for backward compatibility.
 

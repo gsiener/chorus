@@ -531,9 +531,7 @@ export function recordThreadContext(context: {
 export function recordSearchResults(context: {
   query: string;
   docResultsCount: number;
-  initiativeResultsCount: number;
   topDocScore?: number;
-  topInitiativeScore?: number;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
@@ -541,16 +539,11 @@ export function recordSearchResults(context: {
   span.setAttributes({
     "chorus.search.query_length": context.query.length,
     "chorus.search.doc_results_count": context.docResultsCount,
-    "chorus.search.initiative_results_count": context.initiativeResultsCount,
-    "chorus.search.total_results_count": context.docResultsCount + context.initiativeResultsCount,
-    "chorus.search.has_results": context.docResultsCount + context.initiativeResultsCount > 0,
+    "chorus.search.has_results": context.docResultsCount > 0,
   });
 
   if (context.topDocScore !== undefined) {
     span.setAttribute("chorus.search.top_doc_score", context.topDocScore);
-  }
-  if (context.topInitiativeScore !== undefined) {
-    span.setAttribute("chorus.search.top_initiative_score", context.topInitiativeScore);
   }
 }
 

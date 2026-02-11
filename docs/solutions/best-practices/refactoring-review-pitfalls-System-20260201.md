@@ -20,7 +20,7 @@ tags: [code-review, refactoring, backward-compatibility, error-handling, typescr
 An engineer's refactoring branch introduced three categories of issues: a breaking data compatibility change, orphaned duplicate code causing compilation errors, and behavioral changes that broke existing callers.
 
 ## Environment
-- Module: System-wide (kv.ts, linear.ts, slack.ts, checkins.ts, initiatives.ts, utils.ts)
+- Module: System-wide (slack.ts, checkins.ts, utils.ts — `kv.ts`, `linear.ts`, and `initiatives.ts` were later deleted in Feb 2026)
 - Branch: refactor/codebase-improvements
 - Date: 2026-02-01
 
@@ -113,11 +113,11 @@ return { ts };
 
 **Good changes kept:**
 - `GEMINI.md` symlink for multi-AI-tool support
-- `src/kv.ts` for centralized KV key constants
+- `src/kv.ts` for centralized KV key constants *(later deleted Feb 2026)*
 - `src/utils.ts` with extracted `nameToId` utility (DRY)
 - Function extractions in `checkins.ts`: `sendTestCheckin`, `processOwnerCheckin`
-- Function extractions in `linear.ts`: `updateExistingInitiative`, `createAndStoreNewInitiative`
-- Index prefetching optimization in `linear.ts`
+- Function extractions in `linear.ts`: `updateExistingInitiative`, `createAndStoreNewInitiative` *(later deleted Feb 2026)*
+- Index prefetching optimization in `linear.ts` *(later deleted Feb 2026)*
 - `addReaction` using `slackFetch` for consistency
 - Error logging additions (while preserving return behavior)
 

@@ -6,15 +6,12 @@
  */
 
 import type { Env } from "./types";
+import { PRIORITIES_CACHE_TTL_SECONDS } from "./constants";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
-// The parent initiative ID for R&D Priorities 2026
-const RD_PRIORITIES_INITIATIVE_ID = "6aaaa863-a398-4116-ab4f-830606ce4744";
-
 // Cache configuration
 const CACHE_KEY = "linear:priorities:context";
-const CACHE_TTL_SECONDS = 900; // 15 minutes
 
 export interface LinearInitiative {
   id: string;
@@ -92,6 +89,11 @@ export async function fetchPriorityInitiatives(
     return [];
   }
 
+  if (!env.RD_PRIORITIES_INITIATIVE_ID) {
+    console.log("RD_PRIORITIES_INITIATIVE_ID not configured, skipping priority fetch");
+    return [];
+  }
+
   // Query initiativeRelations directly and filter by our parent initiative
   const query = `{
     initiativeRelations(first: 50) {
@@ -148,7 +150,7 @@ export async function fetchPriorityInitiatives(
   // Filter to only relations from our R&D Priorities initiative
   const allRelations = data.data?.initiativeRelations?.nodes || [];
   const priorityRelations = allRelations
-    .filter((r) => r.initiative.id === RD_PRIORITIES_INITIATIVE_ID)
+    .filter((r) => r.initiative.id === env.RD_PRIORITIES_INITIATIVE_ID)
     .map((r) => ({
       sortOrder: r.sortOrder,
       relatedInitiative: r.relatedInitiative,
@@ -163,14 +165,15 @@ export async function fetchPriorityInitiatives(
  */
 function formatPrioritiesContext(
   relations: InitiativeRelation[],
-  ownerSlackIds: Map<string, string> = new Map()
+  ownerSlackIds: Map<string, string> = new Map(),
+  companyName: string = "the company"
 ): string {
   if (relations.length === 0) {
     return "";
   }
 
   const lines: string[] = [
-    "The following are Honeycomb's R&D Priorities for 2026, in stack rank order:",
+    `The following are ${companyName}'s R&D Priorities, in stack rank order:`,
     "",
   ];
 
@@ -275,6 +278,21 @@ export async function clearPrioritiesCache(env: Env): Promise<void> {
 }
 
 /**
+ * Warm the priorities cache by fetching fresh data from Linear.
+ * Called from the daily cron handler to ensure the cache is always hot.
+ */
+export async function warmPrioritiesCache(env: Env): Promise<void> {
+  if (!env.LINEAR_API_KEY) return;
+  try {
+    await clearPrioritiesCache(env);
+    await getPrioritiesContext(env);
+    console.log("Priorities cache warmed");
+  } catch (error) {
+    console.error("Failed to warm priorities cache:", error);
+  }
+}
+
+/**
  * Get R&D Priorities context for Claude, with caching
  */
 export async function getPrioritiesContext(env: Env): Promise<string | null> {
@@ -292,11 +310,11 @@ export async function getPrioritiesContext(env: Env): Promise<string | null> {
     }
 
     const ownerSlackIds = await resolveOwnerSlackIds(relations, env);
-    const context = formatPrioritiesContext(relations, ownerSlackIds);
+    const context = formatPrioritiesContext(relations, ownerSlackIds, env.COMPANY_NAME);
 
     // Cache the result
     await env.DOCS_KV.put(CACHE_KEY, context, {
-      expirationTtl: CACHE_TTL_SECONDS,
+      expirationTtl: PRIORITIES_CACHE_TTL_SECONDS,
     });
 
     return context;

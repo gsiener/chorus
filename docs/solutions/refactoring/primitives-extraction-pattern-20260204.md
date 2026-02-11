@@ -19,11 +19,13 @@ linear_issue: PDD-64
 
 ## Problem
 
-Both `docs.ts` and `initiatives.ts` had evolved with nearly identical patterns:
+Both `docs.ts` and the now-removed `initiatives.ts` had evolved with nearly identical patterns:
 - Manual pagination logic (normalize page, calculate totals, slice items)
 - KV storage pattern: index in one key, items with prefixed keys
 - Error handling with discriminated unions (`_tag` pattern)
 - 6 update functions in `initiatives.ts` that were 80% identical boilerplate
+
+> **Note (Feb 2026):** `initiatives.ts` was deleted when the KV initiative store was removed. The primitives in `src/primitives/` remain useful — `docs.ts` still uses `formatters.ts` and `validators.ts`. The `indexed-store.ts` abstraction is available but currently only used by `docs.ts`.
 
 **Impact:** Code duplication made maintenance difficult and created inconsistency risks. A pagination bug fixed in one file might not be fixed in the other.
 
@@ -244,4 +246,4 @@ export async function updateInitiativeStatus(...) {
 - `src/primitives/formatters.ts` - NEW: Display utilities
 - `src/primitives/index.ts` - NEW: Public exports
 - `src/docs.ts` - Refactored to use formatters
-- `src/initiatives.ts` - Consolidated update functions + uses formatters
+- `src/initiatives.ts` - Consolidated update functions + uses formatters *(deleted Feb 2026)*

@@ -145,7 +145,6 @@ export async function updateThreadContext(
   channel: string,
   threadTs: string,
   messages: ClaudeMessage[],
-  initiativesMentioned: string[],
   env: Env,
   existingContext?: ThreadContext | null,
 ): Promise<void> {
@@ -160,12 +159,6 @@ export async function updateThreadContext(
     ...keyTopics,
   ]);
 
-  // Merge initiatives mentioned
-  const allInitiatives = new Set([
-    ...(resolved?.initiativesMentioned || []),
-    ...initiativesMentioned,
-  ]);
-
   // Generate summary if thread is long enough
   let summary = resolved?.summary;
   if (messages.length >= SUMMARIZATION_THRESHOLD) {
@@ -178,7 +171,6 @@ export async function updateThreadContext(
     channel,
     summary,
     keyTopics: Array.from(allTopics).slice(0, 15),
-    initiativesMentioned: Array.from(allInitiatives),
     messageCount: messages.length,
     lastUpdatedAt: new Date().toISOString(),
   };

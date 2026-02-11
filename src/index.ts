@@ -1,36 +1,17 @@
-import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent, InitiativeStatusValue } from "./types";
+import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, SlackAppMentionEvent } from "./types";
 import {
   parseDocCommand,
-  parseInitiativeCommand,
   parseSearchCommand,
   parseCheckInCommand,
-  VALID_STATUSES,
-  type InitiativeCommand,
 } from "./parseCommands";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
 import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
 import { TimeoutError } from "./http-utils";
 import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
-import {
-  addInitiative,
-  getInitiative,
-  removeInitiative,
-  updateInitiativeStatus,
-  updateInitiativePrd,
-  updateInitiativeName,
-  updateInitiativeDescription,
-  updateInitiativeOwner,
-  addInitiativeMetric,
-  listInitiatives,
-  formatInitiative,
-  formatInitiativeList,
-  searchInitiatives,
-} from "./initiatives";
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
-import { syncLinearProjects, checkAndSyncIfNeeded } from "./linear";
 import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./checkins";
-import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache } from "./linear-priorities";
+import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache, warmPrioritiesCache } from "./linear-priorities";
 import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport, warmAmplitudeCache } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { trace } from "@opentelemetry/api";
@@ -48,10 +29,7 @@ import {
   recordRateLimit,
   recordSlackLatency,
 } from "./telemetry";
-import { mightBeInitiativeCommand, processNaturalLanguageCommand } from "./initiative-nlp";
 import {
-  STATUS_EMOJIS,
-  getStatusEmoji,
   RATE_LIMIT_WINDOW_SECONDS,
   RATE_LIMIT_KEY_PREFIX,
   RATE_LIMITS,
@@ -133,23 +111,10 @@ async function isDuplicateEvent(eventId: string, env: Env): Promise<boolean> {
 const HELP_TEXT = `*Chorus* — your AI chief of staff for product leadership.
 
 *Quick Start:*
-Just ask me anything about your product strategy, roadmap, or initiatives in natural language! I have context on your knowledge base and can help answer questions.
+Just ask me anything about your product strategy, roadmap, or initiatives in natural language! I have context on your knowledge base and R&D Priorities from Linear.
 
-*Search Everything:*
-• \`@Chorus search "query"\` — find initiatives, docs, and PRDs
-
-*Track Initiatives:*
-• \`@Chorus initiatives\` — see all initiatives at a glance
-• \`@Chorus initiative "Name" show\` — view full details
-• \`@Chorus initiative add "Name" - owner @user - description: text\`
-• \`@Chorus initiative "Name" update status [proposed|active|paused|completed|cancelled]\`
-• \`@Chorus initiative "Name" update prd [url]\` — link your PRD
-• \`@Chorus initiative "Name" update name "New Name"\` — rename
-• \`@Chorus initiative "Name" update description "New description"\`
-• \`@Chorus initiative "Name" update owner @newuser\` — reassign
-• \`@Chorus initiative "Name" add metric: [gtm|product] [name] - target: [target]\`
-• \`@Chorus initiative "Name" remove\`
-• \`@Chorus initiatives sync linear\` — import from Linear
+*Search:*
+• \`@Chorus search "query"\` — find docs and PRDs
 
 *Knowledge Base:*
 • \`@Chorus docs\` — list all documents
@@ -164,7 +129,6 @@ Just ask me anything about your product strategy, roadmap, or initiatives in nat
 
 *Pro Tips:*
 • I remember context within threads — just keep chatting!
-• I'll nudge you about missing PRDs or metrics when relevant
 • Initiative owners get weekly DM check-ins
 • 👍 or 👎 my responses to help me improve`;
 
@@ -667,24 +631,6 @@ async function handleSlashCommand(request: Request, env: Env): Promise<Response>
   if (command === "/chorus" || command === "/chorus-help") {
     // Main help command
     response = HELP_TEXT;
-  } else if (command === "/chorus-initiatives" || (command === "/chorus" && text.toLowerCase().startsWith("initiatives"))) {
-    // List initiatives
-    const textParts = text.toLowerCase().replace(/^initiatives?\s*/i, "");
-    const filters: { owner?: string; status?: InitiativeStatusValue } = {};
-
-    if (textParts.includes("mine")) {
-      filters.owner = userId;
-    }
-
-    for (const status of VALID_STATUSES) {
-      if (textParts.includes(status)) {
-        filters.status = status;
-        break;
-      }
-    }
-
-    const initiatives = await listInitiatives(env, Object.keys(filters).length > 0 ? filters : undefined);
-    response = formatInitiativeList(initiatives);
   } else if (command === "/chorus-search" || (command === "/chorus" && text.toLowerCase().startsWith("search"))) {
     // Search
     const query = text.replace(/^search\s*/i, "").trim();
@@ -696,27 +642,13 @@ async function handleSlashCommand(request: Request, env: Env): Promise<Response>
       if (await isRateLimited(userId, "search", env)) {
         response = "You're searching too quickly. Please wait a moment.";
       } else {
-        const [docResults, initiativeResults] = await Promise.all([
-          searchDocuments(query, env, 5),
-          searchInitiatives(env, query, 5),
-        ]);
-
-        const sections: string[] = [];
+        const docResults = await searchDocuments(query, env, 5);
 
         if (docResults.length > 0) {
-          sections.push(formatSearchResultsForUser(docResults));
+          response = formatSearchResultsForUser(docResults);
+        } else {
+          response = `No results found for "${query}".`;
         }
-
-        if (initiativeResults.length > 0) {
-          const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
-          for (const result of initiativeResults) {
-            const statusEmoji = getStatusEmoji(result.initiative.status);
-            initLines.push(`${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
-          }
-          sections.push(initLines.join("\n"));
-        }
-
-        response = sections.length > 0 ? sections.join("\n\n---\n\n") : `No results found for "${query}".`;
       }
     }
   } else if (command === "/chorus-docs") {
@@ -724,7 +656,7 @@ async function handleSlashCommand(request: Request, env: Env): Promise<Response>
     response = await listDocuments(env);
   } else {
     // Unknown command - show help
-    response = `Unknown command. Try:\n• \`/chorus\` - Get help\n• \`/chorus initiatives\` - List initiatives\n• \`/chorus search <query>\` - Search everything\n• \`/chorus-docs\` - List documents`;
+    response = `Unknown command. Try:\n• \`/chorus\` - Get help\n• \`/chorus search <query>\` - Search docs\n• \`/chorus-docs\` - List documents`;
   }
 
   // Return ephemeral response (only visible to the user who triggered the command)
@@ -760,8 +692,8 @@ export const handler = {
           `${briefResult.unmappedUsers.length} unmapped users`
       );
 
-      await checkAndSyncIfNeeded(env);
       await backfillIfNeeded(env);
+      await warmPrioritiesCache(env);
       await warmAmplitudeCache(env);
     })());
   },
@@ -935,46 +867,19 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
       const { query } = searchCommand;
 
-      // Search both documents and initiatives in parallel
-      const [docResults, initiativeResults] = await Promise.all([
-        searchDocuments(query, env, 5),
-        searchInitiatives(env, query, 5),
-      ]);
+      const docResults = await searchDocuments(query, env, 5);
 
       // Record search results for observability
       recordSearchResults({
         query,
         docResultsCount: docResults.length,
-        initiativeResultsCount: initiativeResults.length,
         topDocScore: docResults[0]?.score,
-        topInitiativeScore: initiativeResults[0]?.score,
       });
 
-      const sections: string[] = [];
-
-      // Format document results
       if (docResults.length > 0) {
-        sections.push(formatSearchResultsForUser(docResults));
-      }
-
-      // Format initiative results
-      if (initiativeResults.length > 0) {
-        const initLines: string[] = [`*Initiative Results* (${initiativeResults.length} found)`];
-        for (const result of initiativeResults) {
-          const statusEmoji = getStatusEmoji(result.initiative.status);
-          initLines.push(`\n${statusEmoji} *${result.initiative.name}* (${result.initiative.status})`);
-          initLines.push(`  Owner: <@${result.initiative.owner}>`);
-          if (result.snippet !== result.initiative.name) {
-            initLines.push(`  _${result.snippet}_`);
-          }
-        }
-        sections.push(initLines.join("\n"));
-      }
-
-      if (sections.length === 0) {
-        await postMessage(channel, `No results found for "${query}".`, threadTs, env);
+        await postMessage(channel, formatSearchResultsForUser(docResults), threadTs, env);
       } else {
-        await postMessage(channel, sections.join("\n\n---\n\n"), threadTs, env);
+        await postMessage(channel, `No results found for "${query}".`, threadTs, env);
       }
       return;
     }
@@ -1023,119 +928,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       }));
 
       await postMessage(channel, results.join("\n"), threadTs, env);
-      return;
-    }
-
-    // Check for initiative commands
-    const initCommand = parseInitiativeCommand(text, botUserId);
-    if (initCommand) {
-      recordCommand(`initiative:${initCommand.type}`);
-      let response: string;
-
-      switch (initCommand.type) {
-        case "list": {
-          const filters = initCommand.filters;
-          if (filters?.owner === "__CURRENT_USER__") {
-            filters.owner = user;
-          }
-          const pagination = initCommand.page ? { page: initCommand.page } : undefined;
-          const initiatives = await listInitiatives(env, filters, pagination);
-          response = formatInitiativeList(initiatives);
-          break;
-        }
-        case "add": {
-          const result = await addInitiative(
-            env,
-            initCommand.name,
-            initCommand.description,
-            initCommand.owner,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "show": {
-          const initiative = await getInitiative(env, initCommand.name);
-          response = initiative
-            ? formatInitiative(initiative)
-            : `Initiative "${initCommand.name}" not found.`;
-          break;
-        }
-        case "update-status": {
-          const result = await updateInitiativeStatus(
-            env,
-            initCommand.name,
-            initCommand.status,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "update-prd": {
-          const result = await updateInitiativePrd(
-            env,
-            initCommand.name,
-            initCommand.prdLink,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "update-name": {
-          const result = await updateInitiativeName(
-            env,
-            initCommand.name,
-            initCommand.newName,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "update-description": {
-          const result = await updateInitiativeDescription(
-            env,
-            initCommand.name,
-            initCommand.newDescription,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "update-owner": {
-          const result = await updateInitiativeOwner(
-            env,
-            initCommand.name,
-            initCommand.newOwner,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "add-metric": {
-          const result = await addInitiativeMetric(
-            env,
-            initCommand.name,
-            initCommand.metric,
-            user
-          );
-          response = result.message;
-          break;
-        }
-        case "remove": {
-          const result = await removeInitiative(env, initCommand.name);
-          response = result.message;
-          break;
-        }
-        case "sync-linear": {
-          // Post initial acknowledgment
-          await postMessage(channel, "🔄 Syncing initiatives from Linear...", threadTs, env);
-          const result = await syncLinearProjects(env, user);
-          response = result.message;
-          break;
-        }
-      }
-
-      await postMessage(channel, response, threadTs, env);
       return;
     }
 
@@ -1211,17 +1003,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       return;
     }
 
-    // Try natural language initiative commands before falling back to Claude
-    const isNlpCommand = mightBeInitiativeCommand(cleanedText);
-    if (isNlpCommand) {
-      recordCommand("nlp:initiative");
-      const nlpResult = await processNaturalLanguageCommand(cleanedText, user, env);
-      if (nlpResult) {
-        await postMessage(channel, nlpResult, threadTs, env);
-        return;
-      }
-      // If NLP didn't handle it, fall through to regular Claude
-    }
     // Regular message - route to Claude
     let messages;
     let threadMessageCount = 1;

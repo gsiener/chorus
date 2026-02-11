@@ -169,7 +169,7 @@ describe("brief-checker", () => {
                   nodes: [
                     {
                       sortOrder: 1,
-                      initiative: { id: "6aaaa863-a398-4116-ab4f-830606ce4744" },
+                      initiative: { id: "test-rd-priorities-id" },
                       relatedInitiative: {
                         id: "init-1",
                         name: "Initiative with Brief",
@@ -211,7 +211,7 @@ describe("brief-checker", () => {
                   nodes: [
                     {
                       sortOrder: 1,
-                      initiative: { id: "6aaaa863-a398-4116-ab4f-830606ce4744" },
+                      initiative: { id: "test-rd-priorities-id" },
                       relatedInitiative: {
                         id: "init-1",
                         name: "Initiative without Brief",
@@ -274,7 +274,7 @@ describe("brief-checker", () => {
                   nodes: [
                     {
                       sortOrder: 1,
-                      initiative: { id: "6aaaa863-a398-4116-ab4f-830606ce4744" },
+                      initiative: { id: "test-rd-priorities-id" },
                       relatedInitiative: {
                         id: "init-1",
                         name: "Initiative without Brief",
@@ -322,7 +322,7 @@ describe("brief-checker", () => {
                   nodes: [
                     {
                       sortOrder: 1,
-                      initiative: { id: "6aaaa863-a398-4116-ab4f-830606ce4744" },
+                      initiative: { id: "test-rd-priorities-id" },
                       relatedInitiative: {
                         id: "init-1",
                         name: "Initiative without Brief",
@@ -371,7 +371,7 @@ describe("brief-checker", () => {
                   nodes: [
                     {
                       sortOrder: 1,
-                      initiative: { id: "6aaaa863-a398-4116-ab4f-830606ce4744" },
+                      initiative: { id: "test-rd-priorities-id" },
                       relatedInitiative: {
                         id: "init-1",
                         name: "Ownerless Initiative",

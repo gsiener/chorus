@@ -53,6 +53,8 @@ export function createMockEnv(overrides: Partial<Env & { kv?: MockKV }> = {}): E
     SLACK_SIGNING_SECRET: "test-signing-secret",
     ANTHROPIC_API_KEY: "sk-ant-test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
+    RD_PRIORITIES_INITIATIVE_ID: "test-rd-priorities-id",
+    COMPANY_NAME: "TestCo",
     DOCS_KV: kv as unknown as KVNamespace,
     VECTORIZE: {
       query: vi.fn().mockResolvedValue({ matches: [] }),

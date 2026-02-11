@@ -22,6 +22,8 @@ binding = "AI"
 # - SLACK_SIGNING_SECRET
 # - ANTHROPIC_API_KEY
 # - HONEYCOMB_API_KEY
+# - COMPANY_NAME
+# - RD_PRIORITIES_INITIATIVE_ID
 
 # Cron trigger for DM check-ins (daily 9am ET / 14:00 UTC)
 [triggers]

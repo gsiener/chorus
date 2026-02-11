@@ -1,6 +1,5 @@
 import type { Env, ClaudeMessage, ClaudeResponse, SlackMessage } from "./types";
 import { getKnowledgeBase } from "./docs";
-import { detectInitiativeGaps } from "./initiatives";
 import { getPrioritiesContext } from "./linear-priorities";
 import { getAmplitudeContext } from "./amplitude";
 import { fetchWithRetry, TimeoutError } from "./http-utils";
@@ -137,12 +136,11 @@ export async function generateResponse(
   // Load thread context, knowledge base, priorities, gaps, and user info in parallel
   // NOTE: getInitiativesContext intentionally excluded - see PDD-65
   const kbStartTime = Date.now();
-  const [threadContext, knowledgeBase, prioritiesContext, amplitudeContext, gapNudge, userInfo] = await Promise.all([
+  const [threadContext, knowledgeBase, prioritiesContext, amplitudeContext, userInfo] = await Promise.all([
     threadInfo ? getThreadContext(threadInfo.channel, threadInfo.threadTs, env) : Promise.resolve(null),
     getKnowledgeBase(env),
     getPrioritiesContext(env),
     getAmplitudeContext(env),
-    query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
     userId ? fetchUserInfo(userId, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
@@ -187,19 +185,11 @@ When mentioning any initiative by name, ALWAYS hyperlink it using the Slack form
 
 ${prioritiesContext}`;
   }
-  // NOTE: Tracked initiatives (from getInitiativesContext) are intentionally NOT included
-  // in Claude's context. They caused confusion when users asked about "initiatives" -
-  // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
-  // Users can access tracked initiatives via the `initiatives` command.
-  // See PDD-65 for details.
   if (amplitudeContext) {
     systemPrompt += `\n\n## Product Metrics (from Amplitude)\n\n${amplitudeContext}`;
   }
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
-  }
-  if (gapNudge) {
-    systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
 
   // Inject user context for personalized responses
@@ -282,13 +272,10 @@ ${prioritiesContext}`;
 
   // Update thread context for future messages (fire and forget)
   if (threadInfo) {
-    // Note: Initiative detection could be enhanced by analyzing the response text
-    // For now, we store context without explicit initiative tracking
     updateThreadContext(
       threadInfo.channel,
       threadInfo.threadTs,
       messages,
-      [], // Initiative mentions extracted separately if needed
       env,
       threadContext,
     ).catch(err => console.error("Failed to update thread context:", err));
@@ -321,18 +308,12 @@ export async function generateResponseStreaming(
     return { text: cached, inputTokens: 0, outputTokens: 0, cached: true };
   }
 
-  // Extract query from the last user message for gap detection
-  const lastUserMessage = messages.filter(m => m.role === "user").pop();
-  const query = lastUserMessage?.content || "";
-
-  // Load full knowledge base, initiatives context, priorities, and detect gaps in parallel
-  // NOTE: getInitiativesContext intentionally excluded - see PDD-65
+  // Load full knowledge base, priorities, and metrics in parallel
   const kbStartTime = Date.now();
-  const [knowledgeBase, prioritiesContext, amplitudeContext, gapNudge] = await Promise.all([
+  const [knowledgeBase, prioritiesContext, amplitudeContext] = await Promise.all([
     getKnowledgeBase(env),
     getPrioritiesContext(env),
     getAmplitudeContext(env),
-    query ? detectInitiativeGaps(query, env) : Promise.resolve(null),
   ]);
   const kbLatencyMs = Date.now() - kbStartTime;
 
@@ -363,19 +344,11 @@ When mentioning any initiative by name, ALWAYS hyperlink it using the Slack form
 
 ${prioritiesContext}`;
   }
-  // NOTE: Tracked initiatives (from getInitiativesContext) are intentionally NOT included
-  // in Claude's context. They caused confusion when users asked about "initiatives" -
-  // Claude would list the 40+ tracked projects instead of the 12 R&D Priorities.
-  // Users can access tracked initiatives via the `initiatives` command.
-  // See PDD-65 for details.
   if (amplitudeContext) {
     systemPrompt += `\n\n## Product Metrics (from Amplitude)\n\n${amplitudeContext}`;
   }
   if (knowledgeBase) {
     systemPrompt += `\n\n## Knowledge Base\n\n${knowledgeBase}`;
-  }
-  if (gapNudge) {
-    systemPrompt += `\n\n## Gentle Reminder\n\n${gapNudge}`;
   }
 
   // Record input BEFORE the API call so attributes are captured

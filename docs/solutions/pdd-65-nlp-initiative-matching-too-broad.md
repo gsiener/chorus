@@ -7,12 +7,15 @@ symptoms:
   - General questions about initiatives go through NLP tool path
   - API works correctly but Slack returns wrong data
 root_cause: Keyword matching in mightBeInitiativeCommand was too broad
-resolution_type: feature-disable
+resolution_type: feature-disable → full-removal
 created: 2025-02-04
+superseded: 2026-02-11
 issue: PDD-65
 ---
 
 # NLP Initiative Matching Returns Wrong Data
+
+> **SUPERSEDED**: The entire KV initiative store, NLP routing, and Linear sync system were removed in February 2026. All initiative queries now go through Claude with R&D Priorities from `linear-priorities.ts`. The deleted files include `initiative-nlp.ts`, `initiatives.ts`, `linear.ts`, and `kv.ts`. This doc is preserved as a historical lesson on NLP routing pitfalls.
 
 ## Problem
 
@@ -25,7 +28,7 @@ Screenshot showed: "All Initiatives (45 total)" with Proposed (10), Active (6), 
 ### The Two Data Sources
 
 1. **R&D Priorities** (12 items) - Strategic initiatives from Linear, fetched via `getRDPriorities()` and injected into Claude's system prompt
-2. **Tracked Initiatives** (45 items) - Operational initiatives synced to KV storage, accessed via `listInitiatives()`
+2. **Tracked Initiatives** (45 items) - Operational initiatives synced to KV storage, accessed via `listInitiatives()` *(now deleted)*
 
 ### The Code Flow
 
@@ -74,49 +77,18 @@ This passed tests but didn't work in production. The exact reason is unclear, bu
 - Text cleaning differences between test and production
 - Race conditions in the request handling
 
-## Solution
+## Solution Timeline
 
-Disabled the NLP initiative feature entirely by making `mightBeInitiativeCommand` always return false:
+**Phase 1 (PDD-65, Feb 2025):** Disabled the NLP initiative feature by making `mightBeInitiativeCommand` always return false.
 
-```typescript
-/**
- * PDD-65 FIX: Temporarily disable NLP initiative commands entirely.
- * All initiative queries now go to Claude, which uses R&D Priorities.
- */
-export function mightBeInitiativeCommand(_text: string): boolean {
-  // DISABLED: Always return false to route all queries to Claude
-  return false;
-}
-```
+**Phase 2 (Feb 2026):** Removed the entire KV initiative store system. All deleted:
+- `src/initiative-nlp.ts` — NLP routing and tool dispatch
+- `src/initiatives.ts` — Full CRUD for KV initiatives
+- `src/linear.ts` — Linear project sync to KV
+- `src/kv.ts` — KV key constants
 
-### Trade-offs
+Now all initiative queries go through Claude with R&D Priorities injected into the system prompt via `linear-priorities.ts`. No more dual data sources, no more routing decisions.
 
-**Lost functionality:**
-- Natural language commands like "mark Mobile App as active" no longer work
-- Users must use structured commands: `@Chorus initiatives status mobile-app active`
+## Lesson Learned
 
-**Gained reliability:**
-- All initiative queries now correctly go to Claude
-- Claude uses R&D Priorities (12 strategic items) instead of tracked initiatives (45)
-- Consistent behavior between API and Slack
-
-## Prevention
-
-1. **Test with production-like data** - The tests used mock data that didn't reveal the keyword matching issue
-2. **Log the routing decision** - Add observability to see which path was taken
-3. **Separate query vs command intent** - The NLP feature conflated read queries with write commands
-
-## Files Changed
-
-- `src/initiative-nlp.ts` - Disabled `mightBeInitiativeCommand`
-- `src/__tests__/initiative-nlp.test.ts` - Updated tests to expect false
-- `src/__tests__/parseCommands.test.ts` - Updated tests to expect false
-
-## Future Work
-
-The TODO in the code notes this is a temporary fix. To re-enable NLP:
-
-1. Separate read queries (list, show) from write commands (update, create)
-2. Only enable NLP for write commands that require tool calling
-3. Add comprehensive regex tests with real Slack message samples
-4. Add logging to trace routing decisions in production
+When you have two data sources for the same concept (strategic priorities vs. operational initiatives), routing logic between them will inevitably confuse users. The fix wasn't better routing — it was eliminating the wrong data source entirely.

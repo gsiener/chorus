@@ -11,9 +11,6 @@ import { findUserByEmail } from "./user-mapping";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 
-// The parent initiative ID for R&D Priorities 2026
-const RD_PRIORITIES_INITIATIVE_ID = "6aaaa863-a398-4116-ab4f-830606ce4744";
-
 // Cooldown period: 7 days in milliseconds
 const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -80,6 +77,11 @@ async function fetchInitiativesWithLinks(env: Env): Promise<InitiativeWithLinks[
     return [];
   }
 
+  if (!env.RD_PRIORITIES_INITIATIVE_ID) {
+    console.log("RD_PRIORITIES_INITIATIVE_ID not configured, skipping brief check");
+    return [];
+  }
+
   const query = `{
     initiativeRelations(first: 50) {
       nodes {
@@ -131,7 +133,7 @@ async function fetchInitiativesWithLinks(env: Env): Promise<InitiativeWithLinks[
   // Filter to only relations from our R&D Priorities initiative
   const allRelations = data.data?.initiativeRelations?.nodes || [];
   const priorityRelations = allRelations.filter(
-    (r) => r.initiative.id === RD_PRIORITIES_INITIATIVE_ID
+    (r) => r.initiative.id === env.RD_PRIORITIES_INITIATIVE_ID
   );
 
   return priorityRelations.map((r) => r.relatedInitiative);
