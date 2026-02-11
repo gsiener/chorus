@@ -185,17 +185,3 @@ export async function updateThreadContext(
 
   await saveThreadContext(context, env);
 }
-
-/**
- * Check if thread context exists and is relevant
- */
-export function shouldUseThreadContext(
-  messages: ClaudeMessage[],
-  existingContext: ThreadContext | null
-): boolean {
-  // Use context if we have it and thread is long
-  return (
-    existingContext !== null &&
-    messages.length > SUMMARIZATION_THRESHOLD
-  );
-}
