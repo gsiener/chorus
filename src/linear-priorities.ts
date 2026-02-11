@@ -37,7 +37,7 @@ export interface LinearInitiative {
   };
 }
 
-interface InitiativeRelation {
+export interface InitiativeRelation {
   relatedInitiative: LinearInitiative;
   sortOrder: number;
 }
@@ -229,7 +229,7 @@ function formatPrioritiesContext(
 /**
  * Resolve Linear owner emails to Slack user IDs
  */
-async function resolveOwnerSlackIds(
+export async function resolveOwnerSlackIds(
   relations: InitiativeRelation[],
   env: Env
 ): Promise<Map<string, string>> {

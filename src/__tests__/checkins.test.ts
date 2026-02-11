@@ -8,6 +8,48 @@ import {
 } from "../checkins";
 import type { Env } from "../types";
 
+// Mock linear-priorities module
+vi.mock("../linear-priorities", () => ({
+  fetchPriorityInitiatives: vi.fn(),
+  resolveOwnerSlackIds: vi.fn(),
+  extractPriorityMetadata: vi.fn(() => ({ techRisk: null, theme: null, slackChannel: null })),
+}));
+
+import {
+  fetchPriorityInitiatives,
+  resolveOwnerSlackIds,
+  extractPriorityMetadata,
+} from "../linear-priorities";
+
+const mockFetchPriorities = vi.mocked(fetchPriorityInitiatives);
+const mockResolveOwnerSlackIds = vi.mocked(resolveOwnerSlackIds);
+const mockExtractMetadata = vi.mocked(extractPriorityMetadata);
+
+function makeRelation(overrides: {
+  name: string;
+  status?: string;
+  sortOrder?: number;
+  ownerEmail?: string;
+  ownerName?: string;
+}) {
+  return {
+    sortOrder: overrides.sortOrder ?? 1,
+    relatedInitiative: {
+      id: `init-${overrides.name.toLowerCase().replace(/\s+/g, "-")}`,
+      name: overrides.name,
+      description: null,
+      status: overrides.status ?? "Started",
+      targetDate: null,
+      url: `https://linear.app/test/${overrides.name}`,
+      content: null,
+      owner: overrides.ownerEmail
+        ? { name: overrides.ownerName ?? "Test User", email: overrides.ownerEmail }
+        : null,
+      projects: { nodes: [] },
+    },
+  };
+}
+
 describe("Weekly Check-ins", () => {
   const mockKvStore: Record<string, string> = {};
 
@@ -16,6 +58,7 @@ describe("Weekly Check-ins", () => {
     SLACK_SIGNING_SECRET: "test-signing-secret",
     ANTHROPIC_API_KEY: "sk-ant-test-key",
     HONEYCOMB_API_KEY: "test-honeycomb-key",
+    LINEAR_API_KEY: "lin-test-key",
     DOCS_KV: {
       get: vi.fn((key: string) => Promise.resolve(mockKvStore[key] || null)),
       put: vi.fn((key: string, value: string) => {
@@ -34,6 +77,9 @@ describe("Weekly Check-ins", () => {
   beforeEach(() => {
     Object.keys(mockKvStore).forEach((key) => delete mockKvStore[key]);
     vi.clearAllMocks();
+    mockFetchPriorities.mockResolvedValue([]);
+    mockResolveOwnerSlackIds.mockResolvedValue(new Map());
+    mockExtractMetadata.mockReturnValue({ techRisk: null, theme: null, slackChannel: null });
   });
 
   afterEach(() => {
@@ -48,34 +94,19 @@ describe("Weekly Check-ins", () => {
   });
 
   it("sends check-in to initiative owners", async () => {
-    // Set up mock initiatives
-    mockKvStore["initiatives:index"] = JSON.stringify({
-      initiatives: [
-        {
-          id: "test-initiative",
-          name: "Test Initiative",
-          owner: "U123",
-          status: "active",
-          hasMetrics: false,
-          hasPrd: false,
-          updatedAt: "2024-01-01",
-        },
-      ],
-    });
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Test Initiative",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "alice@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
 
-    mockKvStore["initiatives:detail:test-initiative"] = JSON.stringify({
-      id: "test-initiative",
-      name: "Test Initiative",
-      description: "A test initiative",
-      owner: "U123",
-      status: { value: "active", updatedAt: "2024-01-01", updatedBy: "test" },
-      expectedMetrics: [],
-      createdAt: "2024-01-01",
-      createdBy: "test",
-      updatedAt: "2024-01-01",
-    });
-
-    // Mock Slack API calls
+    // Mock Slack API calls (postDirectMessage uses fetch)
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
@@ -88,29 +119,17 @@ describe("Weekly Check-ins", () => {
     expect(mockKvStore["checkin:last:U123"]).toBeDefined();
   });
 
-  it("skips completed and cancelled initiatives", async () => {
-    mockKvStore["initiatives:index"] = JSON.stringify({
-      initiatives: [
-        {
-          id: "completed-init",
-          name: "Completed Initiative",
-          owner: "U123",
-          status: "completed",
-          hasMetrics: true,
-          hasPrd: true,
-          updatedAt: "2024-01-01",
-        },
-        {
-          id: "cancelled-init",
-          name: "Cancelled Initiative",
-          owner: "U456",
-          status: "cancelled",
-          hasMetrics: false,
-          hasPrd: false,
-          updatedAt: "2024-01-01",
-        },
-      ],
-    });
+  it("skips owners whose email can't be resolved to Slack ID", async () => {
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Test Initiative",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "unknown@example.com",
+      }),
+    ]);
+    // Empty map — no email resolved
+    mockResolveOwnerSlackIds.mockResolvedValue(new Map());
 
     const result = await sendWeeklyCheckins(mockEnv);
 
@@ -119,19 +138,17 @@ describe("Weekly Check-ins", () => {
   });
 
   it("rate limits check-ins per user", async () => {
-    mockKvStore["initiatives:index"] = JSON.stringify({
-      initiatives: [
-        {
-          id: "test-init",
-          name: "Test Initiative",
-          owner: "U123",
-          status: "active",
-          hasMetrics: true,
-          hasPrd: true,
-          updatedAt: "2024-01-01",
-        },
-      ],
-    });
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Test Initiative",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "alice@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
 
     // Set a recent check-in timestamp (within 6 days)
     mockKvStore["checkin:last:U123"] = (Date.now() - 1000 * 60 * 60 * 24 * 2).toString(); // 2 days ago
@@ -148,8 +165,7 @@ describe("Weekly Check-ins", () => {
       TEST_CHECKIN_USER: "U_TEST_USER",
     };
 
-    // No initiatives in the system
-    mockKvStore["initiatives:index"] = JSON.stringify({ initiatives: [] });
+    mockFetchPriorities.mockResolvedValue([]);
 
     // Mock Slack API calls
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -171,32 +187,17 @@ describe("Weekly Check-ins", () => {
       TEST_CHECKIN_USER: "U_TEST_USER",
     };
 
-    // Test user owns an initiative
-    mockKvStore["initiatives:index"] = JSON.stringify({
-      initiatives: [
-        {
-          id: "test-init",
-          name: "Test Initiative",
-          owner: "U_TEST_USER",
-          status: "active",
-          hasMetrics: false,
-          hasPrd: false,
-          updatedAt: "2024-01-01",
-        },
-      ],
-    });
-
-    mockKvStore["initiatives:detail:test-init"] = JSON.stringify({
-      id: "test-init",
-      name: "Test Initiative",
-      description: "A test initiative",
-      owner: "U_TEST_USER",
-      status: { value: "active", updatedAt: "2024-01-01", updatedBy: "test" },
-      expectedMetrics: [],
-      createdAt: "2024-01-01",
-      createdBy: "test",
-      updatedAt: "2024-01-01",
-    });
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Important Priority",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "testuser@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["testuser@example.com", "U_TEST_USER"]])
+    );
 
     // Mock Slack API calls
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -213,31 +214,17 @@ describe("Weekly Check-ins", () => {
   });
 
   it("stores check-in history when sending", async () => {
-    mockKvStore["initiatives:index"] = JSON.stringify({
-      initiatives: [
-        {
-          id: "test-initiative",
-          name: "Test Initiative",
-          owner: "U123",
-          status: "active",
-          hasMetrics: false,
-          hasPrd: true,
-          updatedAt: "2024-01-01",
-        },
-      ],
-    });
-
-    mockKvStore["initiatives:detail:test-initiative"] = JSON.stringify({
-      id: "test-initiative",
-      name: "Test Initiative",
-      description: "A test initiative",
-      owner: "U123",
-      status: { value: "active", updatedAt: "2024-01-01", updatedBy: "test" },
-      expectedMetrics: [],
-      createdAt: "2024-01-01",
-      createdBy: "test",
-      updatedAt: "2024-01-01",
-    });
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Test Priority",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "alice@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -253,9 +240,38 @@ describe("Weekly Check-ins", () => {
     const history = JSON.parse(historyData) as CheckInRecord[];
     expect(history.length).toBe(1);
     expect(history[0].initiativeCount).toBe(1);
-    expect(history[0].missingPrd).toBe(0); // hasPrd is true
-    expect(history[0].missingMetrics).toBe(1); // hasMetrics is false
     expect(history[0].sentAt).toBeDefined();
+  });
+
+  it("groups multiple initiatives per owner", async () => {
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Priority A",
+        status: "Started",
+        sortOrder: 1,
+        ownerEmail: "alice@example.com",
+      }),
+      makeRelation({
+        name: "Priority B",
+        status: "Planned",
+        sortOrder: 5,
+        ownerEmail: "alice@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
+    }));
+
+    await sendWeeklyCheckins(mockEnv);
+
+    const historyData = mockKvStore["checkin:history:U123"];
+    const history = JSON.parse(historyData) as CheckInRecord[];
+    expect(history[0].initiativeCount).toBe(2);
   });
 });
 
@@ -295,8 +311,8 @@ describe("Check-in History Queries", () => {
 
     it("returns the most recent check-in", async () => {
       const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2, missingPrd: 1, missingMetrics: 0 },
-        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1, missingPrd: 1, missingMetrics: 1 },
+        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2 },
+        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1 },
       ];
       mockKvStore["checkin:history:U123"] = JSON.stringify(history);
 
@@ -316,9 +332,9 @@ describe("Check-in History Queries", () => {
 
     it("returns all check-ins", async () => {
       const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2, missingPrd: 1, missingMetrics: 0 },
-        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1, missingPrd: 1, missingMetrics: 1 },
-        { sentAt: "2024-01-01T10:00:00Z", initiativeCount: 1, missingPrd: 0, missingMetrics: 1 },
+        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2 },
+        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1 },
+        { sentAt: "2024-01-01T10:00:00Z", initiativeCount: 1 },
       ];
       mockKvStore["checkin:history:U123"] = JSON.stringify(history);
 
@@ -329,9 +345,9 @@ describe("Check-in History Queries", () => {
 
     it("respects limit parameter", async () => {
       const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2, missingPrd: 1, missingMetrics: 0 },
-        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1, missingPrd: 1, missingMetrics: 1 },
-        { sentAt: "2024-01-01T10:00:00Z", initiativeCount: 1, missingPrd: 0, missingMetrics: 1 },
+        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 2 },
+        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 1 },
+        { sentAt: "2024-01-01T10:00:00Z", initiativeCount: 1 },
       ];
       mockKvStore["checkin:history:U123"] = JSON.stringify(history);
 
@@ -351,37 +367,26 @@ describe("Check-in History Queries", () => {
 
     it("formats single check-in", () => {
       const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 1, missingPrd: 0, missingMetrics: 0 },
+        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 1 },
       ];
 
       const result = formatCheckInHistory(history);
 
       expect(result).toContain("1 record");
-      expect(result).toContain("1 initiative");
-    });
-
-    it("shows gaps in check-ins", () => {
-      const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 3, missingPrd: 2, missingMetrics: 1 },
-      ];
-
-      const result = formatCheckInHistory(history);
-
-      expect(result).toContain("2 missing PRD");
-      expect(result).toContain("1 missing metrics");
+      expect(result).toContain("1 priority");
     });
 
     it("formats multiple check-ins", () => {
       const history: CheckInRecord[] = [
-        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 3, missingPrd: 1, missingMetrics: 0 },
-        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 2, missingPrd: 2, missingMetrics: 1 },
+        { sentAt: "2024-01-15T10:00:00Z", initiativeCount: 3 },
+        { sentAt: "2024-01-08T10:00:00Z", initiativeCount: 2 },
       ];
 
       const result = formatCheckInHistory(history);
 
       expect(result).toContain("2 records");
-      expect(result).toContain("3 initiatives");
-      expect(result).toContain("2 initiatives");
+      expect(result).toContain("3 priorities");
+      expect(result).toContain("2 priorities");
     });
   });
 });
