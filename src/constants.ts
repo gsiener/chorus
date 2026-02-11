@@ -52,7 +52,7 @@ export const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 export const USER_INFO_CACHE_TTL_SECONDS = 60 * 60; // 1 hour
 export const KB_CACHE_TTL_SECONDS = 600; // 10 minutes
 export const AMPLITUDE_CACHE_TTL_SECONDS = 3600; // 1 hour (data is weekly)
-export const PRIORITIES_CACHE_TTL_SECONDS = 90000; // 25 hours — overlaps daily cron window
+export const PRIORITIES_CACHE_TTL_SECONDS = 28800; // 8 hours
 // Scheduled sync intervals
 export const DOC_BACKFILL_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 

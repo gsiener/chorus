@@ -70,4 +70,14 @@ describe("extractPriorityMetadata", () => {
     const { slackChannel } = extractPriorityMetadata(init);
     expect(slackChannel).toBe("#team-platform-2026");
   });
+
+  it("extracts theme correctly when Theme and Slack are on the same line", () => {
+    const init = makeInitiative({
+      description:
+        "--- **R&D Priority Info** - Tech Risk: 🌶🌶 - Theme: Q2 - From transactions to timelines                                               - Slack: #team-agentic-o11y",
+    });
+    const { theme, slackChannel } = extractPriorityMetadata(init);
+    expect(theme).toBe("Q2 - From transactions to timelines");
+    expect(slackChannel).toBe("#team-agentic-o11y");
+  });
 });

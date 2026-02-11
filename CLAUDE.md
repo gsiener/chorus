@@ -27,7 +27,15 @@ We use **Linear** to track tasks:
 
 **Creating issues:**
 
-- Associate new issues with the **Chorus Project** (ID: d581ee59-765e-4257-83f8-44e75620bac6)
+- Associate new issues with the appropriate Linear project based on feature area:
+
+| Feature Area | Project | ID |
+|---|---|---|
+| Chorus (Slack bot core) | [Slack bot](https://linear.app/honeycombio/project/slack-bot-2b67fb6c1541) | `685d051f-a2d4-4b97-a167-264e1b07f60d` |
+| MCP | [MCP](https://linear.app/honeycombio/project/mcp-4ca66bea79ca) | `98e724fa-3dd2-4c44-8908-c768923c13d7` |
+| Anomaly Detection | [Anomaly Detection GA](https://linear.app/honeycombio/project/anomaly-detection-ga-e67e115c7145) | `54373c0c-1272-405e-b166-855ec31b43b3` |
+
+- Default to the **Slack bot** project if the feature area is unclear
 
 **Linear API access:**
 
@@ -56,7 +64,7 @@ source .env && curl -s -X POST https://api.linear.app/graphql \
         "title": "Issue title",
         "description": "Issue description",
         "teamId": "daa91240-92e1-4a78-8cc7-a53684a431b1",
-        "projectId": "d581ee59-765e-4257-83f8-44e75620bac6"
+        "projectId": "685d051f-a2d4-4b97-a167-264e1b07f60d"
       }
     }
   }'
@@ -256,7 +264,7 @@ curl -s "$CHORUS_URL/api/ask" \
 - Use `initiativeRelationCreate/Delete` to add/remove from roadmap
 - Use `initiativeToProjectCreate/Delete` to link/unlink projects
 
-The priorities cache refreshes every 5 minutes.
+The priorities cache has an 8-hour TTL and is warmed daily by the cron handler.
 
 ## Task Tracking Preference
 

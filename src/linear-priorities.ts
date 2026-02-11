@@ -67,8 +67,8 @@ export function extractPriorityMetadata(initiative: LinearInitiative): {
   const riskMatch = text.match(/Tech Risk:\s*([🌶️]+)/);
   const techRisk = riskMatch ? riskMatch[1] : null;
 
-  // Extract theme
-  const themeMatch = text.match(/Theme:\s*(.+?)(?:\n|$)/);
+  // Extract theme (stop before "- Slack:" in case it's on the same line)
+  const themeMatch = text.match(/Theme:\s*(.+?)(?:\s*-\s*Slack:|\n|$)/);
   const theme = themeMatch ? themeMatch[1].trim() : null;
 
   // Extract Slack channel (e.g., "- Slack: #proj-channel")
