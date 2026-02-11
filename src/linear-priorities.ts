@@ -165,7 +165,6 @@ export async function fetchPriorityInitiatives(
  */
 function formatPrioritiesContext(
   relations: InitiativeRelation[],
-  ownerSlackIds: Map<string, string> = new Map(),
   companyName: string = "the company"
 ): string {
   if (relations.length === 0) {
@@ -197,11 +196,7 @@ function formatPrioritiesContext(
     lines.push(`### #${rank}: <${init.url}|${init.name}>`);
     lines.push(`- **Status**: ${init.status}`);
     if (init.owner) {
-      const slackId = init.owner.email
-        ? ownerSlackIds.get(init.owner.email.toLowerCase())
-        : undefined;
-      const ownerDisplay = slackId ? `<@${slackId}>` : init.owner.name;
-      lines.push(`- **Owner**: ${ownerDisplay}`);
+      lines.push(`- **Owner**: ${init.owner.name}`);
     }
     if (theme) {
       lines.push(`- **Theme**: ${theme}`);
@@ -309,8 +304,7 @@ export async function getPrioritiesContext(env: Env): Promise<string | null> {
       return null;
     }
 
-    const ownerSlackIds = await resolveOwnerSlackIds(relations, env);
-    const context = formatPrioritiesContext(relations, ownerSlackIds, env.COMPANY_NAME);
+    const context = formatPrioritiesContext(relations, env.COMPANY_NAME);
 
     // Cache the result
     await env.DOCS_KV.put(CACHE_KEY, context, {
