@@ -31,11 +31,11 @@ We use **Linear** to track tasks:
 
 | Feature Area | Project | ID |
 |---|---|---|
-| Chorus (Slack bot core) | [Slack bot](https://linear.app/honeycombio/project/slack-bot-2b67fb6c1541) | `685d051f-a2d4-4b97-a167-264e1b07f60d` |
+| Chorus (Slack bot core) | [Chorus: PDD chief of staff](https://linear.app/honeycombio/project/chorus-pdd-chief-of-staff-7af7396ddb5d) | `d581ee59-765e-4257-83f8-44e75620bac6` |
 | MCP | [MCP](https://linear.app/honeycombio/project/mcp-4ca66bea79ca) | `98e724fa-3dd2-4c44-8908-c768923c13d7` |
 | Anomaly Detection | [Anomaly Detection GA](https://linear.app/honeycombio/project/anomaly-detection-ga-e67e115c7145) | `54373c0c-1272-405e-b166-855ec31b43b3` |
 
-- Default to the **Slack bot** project if the feature area is unclear
+- Default to the **Chorus** project if the feature area is unclear
 
 **Linear API access:**
 
