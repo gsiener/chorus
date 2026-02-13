@@ -361,59 +361,16 @@ let _pendingGenAiInput: {
  */
 export function recordGenAiOutput(completion: string): void {
   const span = getActiveSpan();
-  if (span) {
-    // Truncate to avoid otel-cf-workers limits
-    const MAX_ATTR_LENGTH = 4096;
-    const truncated = completion.length > MAX_ATTR_LENGTH
-      ? completion.slice(0, MAX_ATTR_LENGTH) + "..."
-      : completion;
+  if (!span) return;
 
-    // Set on span for Honeycomb wide events queryability
-    safeSetAttribute(span, "gen_ai.output.messages", truncated);
-    safeSetAttribute(span, "chorus.output.messages.length", completion.length);
-  }
-}
+  // Truncate to avoid otel-cf-workers limits
+  const MAX_ATTR_LENGTH = 4096;
+  const truncated = completion.length > MAX_ATTR_LENGTH
+    ? completion.slice(0, MAX_ATTR_LENGTH) + "..."
+    : completion;
 
-/**
- * Combined function to record both input and output GenAI content
- * Useful for recording everything in one call after the API response
- */
-export function recordGenAiMessages(data: {
-  systemPrompt?: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  completion?: string;
-}): void {
-  // Record input if provided (may duplicate if recordGenAiInput was called earlier)
-  if (data.systemPrompt) {
-    recordGenAiInput({
-      systemPrompt: data.systemPrompt,
-      messages: data.messages,
-    });
-  }
-
-  // Record output completion
-  if (data.completion) {
-    recordGenAiOutput(data.completion);
-  }
-}
-
-/**
- * @deprecated Use recordGenAiMetrics instead
- */
-export function recordClaudeMetrics(metrics: {
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs?: number;
-  streaming?: boolean;
-}): void {
-  recordGenAiMetrics({
-    operationName: "chat",
-    requestModel: metrics.model,
-    inputTokens: metrics.inputTokens,
-    outputTokens: metrics.outputTokens,
-    streaming: metrics.streaming,
-  });
+  safeSetAttribute(span, "gen_ai.output.messages", truncated);
+  safeSetAttribute(span, "chorus.output.messages.length", completion.length);
 }
 
 /**
@@ -507,29 +464,6 @@ export function recordInitiativeOperation(operation: {
   if (operation.count !== undefined) {
     safeSetAttribute(span, "chorus.initiative.count", operation.count);
   }
-}
-
-/**
- * Record error on the active span
- * Uses OTel standard error.type attribute
- */
-export function recordError(error: Error, context?: string): void {
-  const span = getActiveSpan();
-  if (!span) return;
-
-  safeSetStatus(span, {
-    code: SpanStatusCode.ERROR,
-    message: error.message,
-  });
-
-  // error.type is standard OTel attribute
-  safeSetAttribute(span, "error.type", error.name);
-
-  if (context) {
-    safeSetAttribute(span, "error.context", context);
-  }
-
-  safeRecordException(span, error);
 }
 
 /**
@@ -755,25 +689,6 @@ export function recordFeedback(
     "slack.user_id": attributes.userId,
     "slack.channel": attributes.channel,
   });
-}
-
-/**
- * Emit a structured log event with attributes
- * Uses console methods that Cloudflare Workers observability can parse
- *
- * @param eventName - Name of the event (appears in 'body' or 'name')
- * @param attributes - Key-value pairs to log as separate fields
- * @param level - Log level (info, warn, error)
- */
-export function emitLogEvent(
-  eventName: string,
-  attributes: Record<string, string | number | boolean>,
-  level: "info" | "warn" | "error" = "info"
-): void {
-  const logFn = level === "error" ? console.error : level === "warn" ? console.warn : console.info;
-
-  // Cloudflare Workers observability parses object arguments as attributes
-  logFn(eventName, attributes);
 }
 
 // ============================================================================

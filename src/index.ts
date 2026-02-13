@@ -19,7 +19,6 @@ import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
   recordAgentInvocation,
   recordCommand,
-  recordError,
   recordCategorizedError,
   recordFeedback,
   recordRequestContext,
