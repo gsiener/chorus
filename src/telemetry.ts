@@ -97,6 +97,42 @@ function safeSetAttribute(span: Span | undefined, key: string, value: AttributeV
 }
 
 /**
+ * Safely set span status, handling cases where OTel is not fully initialized
+ */
+function safeSetStatus(span: Span | undefined, status: { code: SpanStatusCode; message?: string }): void {
+  if (!span || typeof span.setStatus !== "function") return;
+  try {
+    span.setStatus(status);
+  } catch {
+    // Silently ignore OTel errors
+  }
+}
+
+/**
+ * Safely add an event to a span
+ */
+function safeAddEvent(span: Span | undefined, name: string, attributes?: Attributes): void {
+  if (!span || typeof span.addEvent !== "function") return;
+  try {
+    span.addEvent(name, attributes);
+  } catch {
+    // Silently ignore OTel errors
+  }
+}
+
+/**
+ * Safely record an exception on a span
+ */
+function safeRecordException(span: Span | undefined, exception: Error): void {
+  if (!span || typeof span.recordException !== "function") return;
+  try {
+    span.recordException(exception);
+  } catch {
+    // Silently ignore OTel errors
+  }
+}
+
+/**
  * Record GenAI chat completion metrics on the active span
  * Follows OTel GenAI semantic conventions for inference spans
  */
@@ -128,7 +164,7 @@ export function recordGenAiMetrics(metrics: {
 
   // Required attributes per OTel GenAI spec
   const provider = metrics.provider ?? GEN_AI_PROVIDERS.ANTHROPIC;
-  span.setAttributes({
+  safeSetAttributes(span, {
     "gen_ai.operation.name": metrics.operationName,
     "gen_ai.provider.name": provider,
     "gen_ai.request.model": metrics.requestModel,
@@ -136,71 +172,71 @@ export function recordGenAiMetrics(metrics: {
 
   // Recommended: server.address
   if (provider === GEN_AI_PROVIDERS.ANTHROPIC) {
-    span.setAttribute("server.address", "api.anthropic.com");
+    safeSetAttribute(span, "server.address", "api.anthropic.com");
   }
 
   // Token usage (recommended)
-  span.setAttributes({
+  safeSetAttributes(span, {
     "gen_ai.usage.input_tokens": metrics.inputTokens,
     "gen_ai.usage.output_tokens": metrics.outputTokens,
   });
 
   // Response model (may differ from request due to aliases)
   if (metrics.responseModel) {
-    span.setAttribute("gen_ai.response.model", metrics.responseModel);
+    safeSetAttribute(span, "gen_ai.response.model", metrics.responseModel);
   }
 
   // Request parameters (recommended)
   if (metrics.maxTokens !== undefined) {
-    span.setAttribute("gen_ai.request.max_tokens", metrics.maxTokens);
+    safeSetAttribute(span, "gen_ai.request.max_tokens", metrics.maxTokens);
   }
   if (metrics.temperature !== undefined) {
-    span.setAttribute("gen_ai.request.temperature", metrics.temperature);
+    safeSetAttribute(span, "gen_ai.request.temperature", metrics.temperature);
   }
   if (metrics.topP !== undefined) {
-    span.setAttribute("gen_ai.request.top_p", metrics.topP);
+    safeSetAttribute(span, "gen_ai.request.top_p", metrics.topP);
   }
   if (metrics.topK !== undefined) {
-    span.setAttribute("gen_ai.request.top_k", metrics.topK);
+    safeSetAttribute(span, "gen_ai.request.top_k", metrics.topK);
   }
   if (metrics.stopSequences && metrics.stopSequences.length > 0) {
-    span.setAttribute("gen_ai.request.stop_sequences", metrics.stopSequences);
+    safeSetAttribute(span, "gen_ai.request.stop_sequences", metrics.stopSequences);
   }
 
   // Response metadata (recommended)
   if (metrics.finishReasons && metrics.finishReasons.length > 0) {
-    span.setAttribute("gen_ai.response.finish_reasons", metrics.finishReasons);
+    safeSetAttribute(span, "gen_ai.response.finish_reasons", metrics.finishReasons);
   }
   if (metrics.responseId) {
-    span.setAttribute("gen_ai.response.id", metrics.responseId);
+    safeSetAttribute(span, "gen_ai.response.id", metrics.responseId);
   }
 
   // Tool/function call tracking (chorus namespace — not yet in OTel spec)
   if (metrics.toolCallsCount !== undefined) {
-    span.setAttribute("chorus.response.tool_calls_count", metrics.toolCallsCount);
+    safeSetAttribute(span, "chorus.response.tool_calls_count", metrics.toolCallsCount);
   }
 
   // Conversation tracking (spec: conditionally required on invoke_agent)
   if (metrics.conversationId) {
-    span.setAttribute("gen_ai.conversation.id", metrics.conversationId);
+    safeSetAttribute(span, "gen_ai.conversation.id", metrics.conversationId);
   }
 
   // Streaming indicator (chorus namespace — not in OTel spec)
   if (metrics.streaming !== undefined) {
-    span.setAttribute("chorus.request.streaming", metrics.streaming);
+    safeSetAttribute(span, "chorus.request.streaming", metrics.streaming);
   }
 
   // Response-level cache hit (chorus namespace — not in OTel spec)
   if (metrics.cacheHit !== undefined) {
-    span.setAttribute("chorus.response.cache_hit", metrics.cacheHit);
+    safeSetAttribute(span, "chorus.response.cache_hit", metrics.cacheHit);
   }
 
   // Anthropic prompt caching tokens (chorus namespace — awaiting upstream semantic-conventions #1959)
   if (metrics.cacheCreationInputTokens !== undefined) {
-    span.setAttribute("chorus.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
+    safeSetAttribute(span, "chorus.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
   }
   if (metrics.cacheReadInputTokens !== undefined) {
-    span.setAttribute("chorus.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
+    safeSetAttribute(span, "chorus.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
   }
 
   // Record any pending input data (stored earlier via recordGenAiInput)
@@ -213,19 +249,19 @@ export function recordGenAiMetrics(metrics: {
     const truncate = (s: string) => s.length > MAX_ATTR_LENGTH ? s.slice(0, MAX_ATTR_LENGTH) + "..." : s;
 
     // System instructions (OTel GenAI convention)
-    span.setAttribute("gen_ai.system_instructions", truncate(data.systemPrompt));
-    span.setAttribute("gen_ai.system_instructions.length", data.systemPrompt.length);
+    safeSetAttribute(span, "gen_ai.system_instructions", truncate(data.systemPrompt));
+    safeSetAttribute(span, "gen_ai.system_instructions.length", data.systemPrompt.length);
 
     // Serialize messages as JSON for queryability (Honeycomb wide events approach)
     const messagesJson = JSON.stringify(data.messages);
-    span.setAttribute("gen_ai.input.messages", truncate(messagesJson));
-    span.setAttribute("gen_ai.input.messages_count", data.messages.length);
+    safeSetAttribute(span, "gen_ai.input.messages", truncate(messagesJson));
+    safeSetAttribute(span, "gen_ai.input.messages_count", data.messages.length);
 
     // Message counts for filtering
     const userCount = data.messages.filter((m) => m.role === "user").length;
     const assistantCount = data.messages.filter((m) => m.role === "assistant").length;
-    span.setAttribute("gen_ai.input.user_message_count", userCount);
-    span.setAttribute("gen_ai.input.assistant_message_count", assistantCount);
+    safeSetAttribute(span, "gen_ai.input.user_message_count", userCount);
+    safeSetAttribute(span, "gen_ai.input.assistant_message_count", assistantCount);
   }
 }
 
@@ -276,20 +312,20 @@ export function recordEmbeddingsMetrics(metrics: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "gen_ai.operation.name": "embeddings",
     "gen_ai.provider.name": metrics.provider ?? GEN_AI_PROVIDERS.CLOUDFLARE,
     "gen_ai.request.model": metrics.model,
   });
 
   if (metrics.inputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.input_tokens", metrics.inputTokens);
+    safeSetAttribute(span, "gen_ai.usage.input_tokens", metrics.inputTokens);
   }
   if (metrics.dimensionCount !== undefined) {
-    span.setAttribute("gen_ai.embeddings.dimension.count", metrics.dimensionCount);
+    safeSetAttribute(span, "gen_ai.embeddings.dimension.count", metrics.dimensionCount);
   }
   if (metrics.inputCount !== undefined) {
-    span.setAttribute("chorus.embeddings.input_count", metrics.inputCount);
+    safeSetAttribute(span, "chorus.embeddings.input_count", metrics.inputCount);
   }
 }
 
@@ -333,8 +369,8 @@ export function recordGenAiOutput(completion: string): void {
       : completion;
 
     // Set on span for Honeycomb wide events queryability
-    span.setAttribute("gen_ai.output.messages", truncated);
-    span.setAttribute("chorus.output.messages.length", completion.length);
+    safeSetAttribute(span, "gen_ai.output.messages", truncated);
+    safeSetAttribute(span, "chorus.output.messages.length", completion.length);
   }
 }
 
@@ -387,7 +423,7 @@ export function recordSlackApiCall(endpoint: string, success: boolean): void {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "slack.api.endpoint": endpoint,
     "slack.api.success": success,
   });
@@ -406,19 +442,19 @@ export function recordDocOperation(operation: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.data_source.operation": operation.type,
     "chorus.data_source.success": operation.success,
   });
 
   if (operation.title) {
-    span.setAttribute("chorus.data_source.id", operation.title);
+    safeSetAttribute(span, "chorus.data_source.id", operation.title);
   }
   if (operation.charCount !== undefined) {
-    span.setAttribute("chorus.data_source.char_count", operation.charCount);
+    safeSetAttribute(span, "chorus.data_source.char_count", operation.charCount);
   }
   if (operation.chunksIndexed !== undefined) {
-    span.setAttribute("chorus.data_source.chunks_indexed", operation.chunksIndexed);
+    safeSetAttribute(span, "chorus.data_source.chunks_indexed", operation.chunksIndexed);
   }
 }
 
@@ -434,17 +470,17 @@ export function recordVectorSearch(metrics: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.data_source.operation": "search",
     "chorus.data_source.query_length": metrics.query.length,
     "chorus.data_source.results_count": metrics.resultsCount,
   });
 
   if (metrics.topScore !== undefined) {
-    span.setAttribute("chorus.data_source.top_score", metrics.topScore);
+    safeSetAttribute(span, "chorus.data_source.top_score", metrics.topScore);
   }
   if (metrics.latencyMs !== undefined) {
-    span.setAttribute("chorus.data_source.latency_ms", metrics.latencyMs);
+    safeSetAttribute(span, "chorus.data_source.latency_ms", metrics.latencyMs);
   }
 }
 
@@ -460,16 +496,16 @@ export function recordInitiativeOperation(operation: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.initiative.operation": operation.type,
     "chorus.initiative.success": operation.success,
   });
 
   if (operation.name) {
-    span.setAttribute("chorus.initiative.name", operation.name);
+    safeSetAttribute(span, "chorus.initiative.name", operation.name);
   }
   if (operation.count !== undefined) {
-    span.setAttribute("chorus.initiative.count", operation.count);
+    safeSetAttribute(span, "chorus.initiative.count", operation.count);
   }
 }
 
@@ -481,19 +517,19 @@ export function recordError(error: Error, context?: string): void {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setStatus({
+  safeSetStatus(span, {
     code: SpanStatusCode.ERROR,
     message: error.message,
   });
 
   // error.type is standard OTel attribute
-  span.setAttribute("error.type", error.name);
+  safeSetAttribute(span, "error.type", error.name);
 
   if (context) {
-    span.setAttribute("error.context", context);
+    safeSetAttribute(span, "error.context", context);
   }
 
-  span.recordException(error);
+  safeRecordException(span, error);
 }
 
 /**
@@ -503,7 +539,7 @@ export function recordCommand(command: string): void {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttribute("chorus.command", command);
+  safeSetAttribute(span, "chorus.command", command);
 }
 
 /**
@@ -522,9 +558,9 @@ export function recordRequestContext(context: {
   eventType: "app_mention" | "reaction_added" | "scheduled";
 }): void {
   const span = getActiveSpan();
-  if (!span || typeof span.setAttributes !== "function") return;
+  if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     // User context
     "slack.user_id": context.userId,
     "slack.channel": context.channel,
@@ -537,8 +573,8 @@ export function recordRequestContext(context: {
     "slack.is_thread": context.isThread,
   });
 
-  if (context.threadTs && typeof span.setAttribute === "function") {
-    span.setAttribute("slack.thread_ts", context.threadTs);
+  if (context.threadTs) {
+    safeSetAttribute(span, "slack.thread_ts", context.threadTs);
   }
 }
 
@@ -553,7 +589,7 @@ export function recordThreadContext(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "slack.thread.message_count": context.messageCount,
     "slack.thread.user_message_count": context.userMessageCount,
     "slack.thread.bot_message_count": context.botMessageCount,
@@ -571,14 +607,14 @@ export function recordSearchResults(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.search.query_length": context.query.length,
     "chorus.search.doc_results_count": context.docResultsCount,
     "chorus.search.has_results": context.docResultsCount > 0,
   });
 
   if (context.topDocScore !== undefined) {
-    span.setAttribute("chorus.search.top_doc_score", context.topDocScore);
+    safeSetAttribute(span, "chorus.search.top_doc_score", context.topDocScore);
   }
 }
 
@@ -597,7 +633,7 @@ export function recordClaudeResponse(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     // Token metrics (OTel GenAI conventions)
     "gen_ai.usage.input_tokens": context.inputTokens,
     "gen_ai.usage.output_tokens": context.outputTokens,
@@ -609,11 +645,11 @@ export function recordClaudeResponse(context: {
   });
 
   if (context.stopReason) {
-    span.setAttribute("gen_ai.response.finish_reasons", [context.stopReason]);
+    safeSetAttribute(span, "gen_ai.response.finish_reasons", [context.stopReason]);
   }
 
   // Add span event for the completion
-  span.addEvent("response_complete", {
+  safeAddEvent(span, "response_complete", {
     "chorus.response.length": context.responseLength,
     "gen_ai.usage.input_tokens": context.inputTokens,
     "gen_ai.usage.output_tokens": context.outputTokens,
@@ -634,7 +670,7 @@ export function recordFileProcessing(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.file.name": context.fileName,
     "chorus.file.type": context.fileType,
     "chorus.file.size_kb": context.fileSizeKb,
@@ -642,10 +678,10 @@ export function recordFileProcessing(context: {
   });
 
   if (context.extractedLength !== undefined) {
-    span.setAttribute("chorus.file.extracted_length", context.extractedLength);
+    safeSetAttribute(span, "chorus.file.extracted_length", context.extractedLength);
   }
   if (context.errorMessage) {
-    span.setAttribute("chorus.file.error", context.errorMessage);
+    safeSetAttribute(span, "chorus.file.error", context.errorMessage);
   }
 }
 
@@ -660,13 +696,13 @@ export function recordRateLimit(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "chorus.rate_limit.action": context.action,
     "chorus.rate_limit.was_limited": context.wasLimited,
   });
 
   if (context.wasLimited) {
-    span.addEvent("rate_limited", {
+    safeAddEvent(span, "rate_limited", {
       "slack.user_id": context.userId,
       "chorus.rate_limit.action": context.action,
     });
@@ -692,7 +728,7 @@ export function recordFeedback(
   const span = getActiveSpan();
 
   // Set span attributes for filtering/grouping in traces (primary method)
-  span?.setAttributes({
+  safeSetAttributes(span, {
     "chorus.feedback": feedback,
     "chorus.feedback.message_ts": attributes.messageTs,
     "slack.event_type": "reaction_added",
@@ -702,7 +738,7 @@ export function recordFeedback(
   });
 
   // Add span event for the feedback occurrence (OTel best practice)
-  span?.addEvent("feedback_received", {
+  safeAddEvent(span, "feedback_received", {
     "chorus.feedback": feedback,
     "chorus.feedback.message_ts": attributes.messageTs,
     "slack.reaction": attributes.reaction,
@@ -783,9 +819,7 @@ export function calculateCost(
  */
 export function recordCost(estimatedCostUsd: number): void {
   const span = getActiveSpan();
-  if (span) {
-    span.setAttribute("gen_ai.usage.estimated_cost_usd", estimatedCostUsd);
-  }
+  safeSetAttribute(span, "gen_ai.usage.estimated_cost_usd", estimatedCostUsd);
 }
 
 // ============================================================================
@@ -804,18 +838,18 @@ export function recordGenAiLatency(latency: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttribute("chorus.latency.total_generation_ms", latency.totalGenerationMs);
+  safeSetAttribute(span, "chorus.latency.total_generation_ms", latency.totalGenerationMs);
 
   // Seconds-unit attribute for Honeycomb HEATMAP/P99 queries
   const durationS = latency.totalGenerationMs / 1000;
-  span.setAttribute("chorus.client.operation.duration_s", durationS);
+  safeSetAttribute(span, "chorus.client.operation.duration_s", durationS);
 
   if (latency.timeToFirstTokenMs !== undefined) {
-    span.setAttribute("chorus.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
-    span.setAttribute("chorus.server.time_to_first_token_s", latency.timeToFirstTokenMs / 1000);
+    safeSetAttribute(span, "chorus.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
+    safeSetAttribute(span, "chorus.server.time_to_first_token_s", latency.timeToFirstTokenMs / 1000);
   } else if (latency.streaming === false) {
     // Non-streaming: TTFT ≈ total duration (server returns all at once)
-    span.setAttribute("chorus.server.time_to_first_token_s", durationS);
+    safeSetAttribute(span, "chorus.server.time_to_first_token_s", durationS);
   }
 }
 
@@ -831,13 +865,13 @@ export function recordSlackLatency(latency: {
   if (!span) return;
 
   if (latency.threadFetchMs !== undefined) {
-    span.setAttribute("slack.latency.thread_fetch_ms", latency.threadFetchMs);
+    safeSetAttribute(span, "slack.latency.thread_fetch_ms", latency.threadFetchMs);
   }
   if (latency.messagePostMs !== undefined) {
-    span.setAttribute("slack.latency.message_post_ms", latency.messagePostMs);
+    safeSetAttribute(span, "slack.latency.message_post_ms", latency.messagePostMs);
   }
   if (latency.messageUpdateMs !== undefined) {
-    span.setAttribute("slack.latency.message_update_ms", latency.messageUpdateMs);
+    safeSetAttribute(span, "slack.latency.message_update_ms", latency.messageUpdateMs);
   }
 }
 
@@ -856,7 +890,7 @@ export function recordConversationQuality(context: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "conversation.turn_count": context.turnCount,
     "conversation.context_length": context.contextLength,
     "conversation.was_truncated": context.wasTruncated,
@@ -879,14 +913,14 @@ export function recordKnowledgeBaseMetrics(metrics: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "knowledge_base.documents_count": metrics.documentsCount,
     "knowledge_base.retrieval_latency_ms": metrics.retrievalLatencyMs,
     "knowledge_base.cache_hit": metrics.cacheHit,
   });
 
   if (metrics.totalCharacters !== undefined) {
-    span.setAttribute("knowledge_base.total_characters", metrics.totalCharacters);
+    safeSetAttribute(span, "knowledge_base.total_characters", metrics.totalCharacters);
   }
 }
 
@@ -960,20 +994,20 @@ export function recordCategorizedError(error: Error, context?: string): void {
 
   const { category, retryable } = categorizeError(error);
 
-  span.setStatus({
+  safeSetStatus(span, {
     code: SpanStatusCode.ERROR,
     message: error.message,
   });
 
-  span.setAttributes({
+  safeSetAttributes(span, {
     "error.type": error.name,
     "error.category": category,
     "error.retryable": retryable,
   });
 
   if (context) {
-    span.setAttribute("error.context", context);
+    safeSetAttribute(span, "error.context", context);
   }
 
-  span.recordException(error);
+  safeRecordException(span, error);
 }

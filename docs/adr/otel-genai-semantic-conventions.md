@@ -105,6 +105,12 @@ Full audit against current spec. Changes:
 
 5. **Added `server.address`** — Set to `api.anthropic.com` for Anthropic provider (recommended attribute).
 
+### 2026-02-13 — Defensive span method calls (PDD-85)
+
+**Commit:** (this commit)
+
+Fixed `span.setAttributes is not a function` errors in Cloudflare Workers integration tests. The `otel-cf-workers` library sometimes provides span objects without standard OTel methods. Replaced all direct `span.setAttributes()`, `span.setAttribute()`, `span.setStatus()`, `span.addEvent()`, and `span.recordException()` calls with defensive wrappers (`safeSetAttributes`, `safeSetAttribute`, `safeSetStatus`, `safeAddEvent`, `safeRecordException`) that check for method existence before calling.
+
 ## Decisions
 
 ### Span attributes over histogram metrics
