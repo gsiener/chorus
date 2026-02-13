@@ -6,7 +6,9 @@
  *
  * Follows OpenTelemetry Semantic Conventions:
  * - General: https://opentelemetry.io/docs/specs/semconv/
- * - GenAI v1.37.0+: https://opentelemetry.io/docs/specs/semconv/gen-ai/
+ * - GenAI spans: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
+ * - GenAI agent spans: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/
+ * - GenAI metrics: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/
  * - HTTP: https://opentelemetry.io/docs/specs/semconv/http/
  * - Messaging: https://opentelemetry.io/docs/specs/semconv/messaging/
  *
@@ -15,19 +17,18 @@
  * - Slack-specific: slack.* (custom namespace for Slack API context)
  * - App-specific: chorus.* (custom namespace for Chorus features)
  *
- * GenAI semantic conventions:
- * - gen_ai.system: Provider identifier (e.g., "anthropic", "openai")
- * - gen_ai.operation.name: Operation type ("chat", "embeddings")
+ * GenAI semantic conventions (OTel spec):
+ * - gen_ai.provider.name: Provider identifier (e.g., "anthropic", "openai")
+ * - gen_ai.operation.name: Operation type ("chat", "embeddings", "invoke_agent")
+ * - gen_ai.agent.name: Agent identifier (e.g., "chorus")
  * - gen_ai.request.model: Model name in request
  * - gen_ai.response.model: Actual model in response
  * - gen_ai.usage.input_tokens: Input token count
  * - gen_ai.usage.output_tokens: Output token count
- * - gen_ai.usage.estimated_cost_usd: Estimated cost in USD
  * - gen_ai.response.finish_reasons: Stop reasons array
  * - gen_ai.system_instructions: System prompt content
  * - gen_ai.input.messages: Serialized conversation messages
- * - gen_ai.output.content: Generated completion
- * - gen_ai.latency.*: Latency breakdown metrics
+ * - gen_ai.output.messages: Generated completion
  *
  * Conversation quality signals:
  * - conversation.turn_count: Number of messages in thread
@@ -51,18 +52,18 @@
 import { trace, SpanStatusCode, Span, Attributes, AttributeValue } from "@opentelemetry/api";
 
 /**
- * Standard GenAI system identifiers per OTel spec
+ * Standard GenAI provider identifiers per OTel spec
  */
-export const GEN_AI_SYSTEMS = {
+export const GEN_AI_PROVIDERS = {
   ANTHROPIC: "anthropic",
   OPENAI: "openai",
   COHERE: "cohere",
-  VERTEX_AI: "vertex_ai",
-  AWS_BEDROCK: "aws_bedrock",
+  VERTEX_AI: "gcp.vertex_ai",
+  AWS_BEDROCK: "aws.bedrock",
   CLOUDFLARE: "cloudflare",
 } as const;
 
-export type GenAiSystem = (typeof GEN_AI_SYSTEMS)[keyof typeof GEN_AI_SYSTEMS];
+export type GenAiProvider = (typeof GEN_AI_PROVIDERS)[keyof typeof GEN_AI_PROVIDERS];
 
 /**
  * Get the current active span
@@ -97,11 +98,11 @@ function safeSetAttribute(span: Span | undefined, key: string, value: AttributeV
 
 /**
  * Record GenAI chat completion metrics on the active span
- * Follows OTel GenAI semantic conventions v1.29.0 for inference spans
+ * Follows OTel GenAI semantic conventions for inference spans
  */
 export function recordGenAiMetrics(metrics: {
   operationName: "chat" | "embeddings" | "text_completion";
-  system?: GenAiSystem;
+  provider?: GenAiProvider;
   requestModel: string;
   responseModel?: string;
   inputTokens: number;
@@ -116,24 +117,27 @@ export function recordGenAiMetrics(metrics: {
   streaming?: boolean;
   conversationId?: string;
   cacheHit?: boolean;
-  // Anthropic prompt caching tokens (experimental convention)
+  // Anthropic prompt caching tokens (custom — awaiting upstream semantic-conventions #1959)
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
-  // Tool/function calls (per GenAI events spec)
+  // Tool/function call tracking
   toolCallsCount?: number;
 }): void {
   const span = getActiveSpan();
   if (!span) return;
 
   // Required attributes per OTel GenAI spec
+  const provider = metrics.provider ?? GEN_AI_PROVIDERS.ANTHROPIC;
   span.setAttributes({
     "gen_ai.operation.name": metrics.operationName,
-    // gen_ai.system is the canonical identifier (replaces provider.name)
-    "gen_ai.system": metrics.system ?? GEN_AI_SYSTEMS.ANTHROPIC,
-    // gen_ai.provider.name for Honeycomb querying alongside gen_ai.system
-    "gen_ai.provider.name": metrics.system ?? GEN_AI_SYSTEMS.ANTHROPIC,
+    "gen_ai.provider.name": provider,
     "gen_ai.request.model": metrics.requestModel,
   });
+
+  // Recommended: server.address
+  if (provider === GEN_AI_PROVIDERS.ANTHROPIC) {
+    span.setAttribute("server.address", "api.anthropic.com");
+  }
 
   // Token usage (recommended)
   span.setAttributes({
@@ -171,32 +175,32 @@ export function recordGenAiMetrics(metrics: {
     span.setAttribute("gen_ai.response.id", metrics.responseId);
   }
 
-  // Tool/function call tracking
+  // Tool/function call tracking (chorus namespace — not yet in OTel spec)
   if (metrics.toolCallsCount !== undefined) {
-    span.setAttribute("gen_ai.response.tool_calls_count", metrics.toolCallsCount);
+    span.setAttribute("chorus.response.tool_calls_count", metrics.toolCallsCount);
   }
 
-  // Conversation tracking (experimental)
+  // Conversation tracking (spec: conditionally required on invoke_agent)
   if (metrics.conversationId) {
     span.setAttribute("gen_ai.conversation.id", metrics.conversationId);
   }
 
-  // Streaming indicator (experimental)
+  // Streaming indicator (chorus namespace — not in OTel spec)
   if (metrics.streaming !== undefined) {
-    span.setAttribute("gen_ai.request.streaming", metrics.streaming);
+    span.setAttribute("chorus.request.streaming", metrics.streaming);
   }
 
-  // Response-level cache hit (experimental)
+  // Response-level cache hit (chorus namespace — not in OTel spec)
   if (metrics.cacheHit !== undefined) {
-    span.setAttribute("gen_ai.response.cache_hit", metrics.cacheHit);
+    span.setAttribute("chorus.response.cache_hit", metrics.cacheHit);
   }
 
-  // Anthropic prompt caching tokens (experimental convention)
+  // Anthropic prompt caching tokens (chorus namespace — awaiting upstream semantic-conventions #1959)
   if (metrics.cacheCreationInputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
+    span.setAttribute("chorus.usage.cache_creation_input_tokens", metrics.cacheCreationInputTokens);
   }
   if (metrics.cacheReadInputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
+    span.setAttribute("chorus.usage.cache_read_input_tokens", metrics.cacheReadInputTokens);
   }
 
   // Record any pending input data (stored earlier via recordGenAiInput)
@@ -208,7 +212,7 @@ export function recordGenAiMetrics(metrics: {
     const MAX_ATTR_LENGTH = 4096;
     const truncate = (s: string) => s.length > MAX_ATTR_LENGTH ? s.slice(0, MAX_ATTR_LENGTH) + "..." : s;
 
-    // System instructions (OTel GenAI v1.37+ convention)
+    // System instructions (OTel GenAI convention)
     span.setAttribute("gen_ai.system_instructions", truncate(data.systemPrompt));
     span.setAttribute("gen_ai.system_instructions.length", data.systemPrompt.length);
 
@@ -226,12 +230,45 @@ export function recordGenAiMetrics(metrics: {
 }
 
 /**
+ * Record agent invocation attributes on the active span
+ * Follows OTel GenAI agent span conventions:
+ * https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/
+ */
+export function recordAgentInvocation(agent: {
+  name: string;
+  description?: string;
+  provider?: GenAiProvider;
+  requestModel?: string;
+  conversationId?: string;
+}): void {
+  const span = getActiveSpan();
+  if (!span) return;
+
+  const provider = agent.provider ?? GEN_AI_PROVIDERS.ANTHROPIC;
+  safeSetAttributes(span, {
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.provider.name": provider,
+    "gen_ai.agent.name": agent.name,
+  });
+
+  if (agent.description) {
+    safeSetAttribute(span, "gen_ai.agent.description", agent.description);
+  }
+  if (agent.requestModel) {
+    safeSetAttribute(span, "gen_ai.request.model", agent.requestModel);
+  }
+  if (agent.conversationId) {
+    safeSetAttribute(span, "gen_ai.conversation.id", agent.conversationId);
+  }
+}
+
+/**
  * Record GenAI embeddings operation metrics
- * Follows OTel GenAI semantic conventions v1.29.0 for embeddings spans
+ * Follows OTel GenAI semantic conventions for embeddings spans
  */
 export function recordEmbeddingsMetrics(metrics: {
   model: string;
-  system?: GenAiSystem;
+  provider?: GenAiProvider;
   inputTokens?: number;
   dimensionCount?: number;
   inputCount?: number;
@@ -241,7 +278,7 @@ export function recordEmbeddingsMetrics(metrics: {
 
   span.setAttributes({
     "gen_ai.operation.name": "embeddings",
-    "gen_ai.system": metrics.system ?? GEN_AI_SYSTEMS.CLOUDFLARE,
+    "gen_ai.provider.name": metrics.provider ?? GEN_AI_PROVIDERS.CLOUDFLARE,
     "gen_ai.request.model": metrics.model,
   });
 
@@ -249,10 +286,10 @@ export function recordEmbeddingsMetrics(metrics: {
     span.setAttribute("gen_ai.usage.input_tokens", metrics.inputTokens);
   }
   if (metrics.dimensionCount !== undefined) {
-    span.setAttribute("gen_ai.request.embedding_dimensions", metrics.dimensionCount);
+    span.setAttribute("gen_ai.embeddings.dimension.count", metrics.dimensionCount);
   }
   if (metrics.inputCount !== undefined) {
-    span.setAttribute("gen_ai.request.input_count", metrics.inputCount);
+    span.setAttribute("chorus.embeddings.input_count", metrics.inputCount);
   }
 }
 
@@ -260,7 +297,7 @@ export function recordEmbeddingsMetrics(metrics: {
  * Record GenAI input (system prompt + messages) as span attributes
  * Call this BEFORE the API call so otel-cf-workers captures the attributes
  *
- * Uses OTel GenAI semantic conventions v1.37+:
+ * Uses OTel GenAI semantic conventions:
  * - gen_ai.system_instructions for system prompt
  * - gen_ai.input.messages for serialized conversation
  */
@@ -283,8 +320,8 @@ let _pendingGenAiInput: {
  * Record GenAI output (completion) as span attribute
  * Call this AFTER the API response but while span is still active
  *
- * Uses OTel GenAI semantic conventions v1.37+:
- * - gen_ai.output.content for the generated text
+ * Uses OTel GenAI semantic conventions:
+ * - gen_ai.output.messages for the generated text
  */
 export function recordGenAiOutput(completion: string): void {
   const span = getActiveSpan();
@@ -296,8 +333,8 @@ export function recordGenAiOutput(completion: string): void {
       : completion;
 
     // Set on span for Honeycomb wide events queryability
-    span.setAttribute("gen_ai.output.content", truncated);
-    span.setAttribute("gen_ai.output.content.length", completion.length);
+    span.setAttribute("gen_ai.output.messages", truncated);
+    span.setAttribute("chorus.output.messages.length", completion.length);
   }
 }
 
@@ -325,7 +362,6 @@ export function recordGenAiMessages(data: {
 }
 
 /**
- * Backward-compatible alias for recordGenAiMetrics
  * @deprecated Use recordGenAiMetrics instead
  */
 export function recordClaudeMetrics(metrics: {
@@ -359,7 +395,6 @@ export function recordSlackApiCall(endpoint: string, success: boolean): void {
 
 /**
  * Record document operation on the active span
- * Uses gen_ai.data_source.* for RAG-related operations
  */
 export function recordDocOperation(operation: {
   type: "add" | "remove" | "search" | "backfill";
@@ -372,18 +407,18 @@ export function recordDocOperation(operation: {
   if (!span) return;
 
   span.setAttributes({
-    "gen_ai.data_source.operation": operation.type,
-    "gen_ai.data_source.success": operation.success,
+    "chorus.data_source.operation": operation.type,
+    "chorus.data_source.success": operation.success,
   });
 
   if (operation.title) {
-    span.setAttribute("gen_ai.data_source.id", operation.title);
+    span.setAttribute("chorus.data_source.id", operation.title);
   }
   if (operation.charCount !== undefined) {
-    span.setAttribute("gen_ai.data_source.char_count", operation.charCount);
+    span.setAttribute("chorus.data_source.char_count", operation.charCount);
   }
   if (operation.chunksIndexed !== undefined) {
-    span.setAttribute("gen_ai.data_source.chunks_indexed", operation.chunksIndexed);
+    span.setAttribute("chorus.data_source.chunks_indexed", operation.chunksIndexed);
   }
 }
 
@@ -400,16 +435,16 @@ export function recordVectorSearch(metrics: {
   if (!span) return;
 
   span.setAttributes({
-    "gen_ai.data_source.operation": "search",
-    "gen_ai.data_source.query_length": metrics.query.length,
-    "gen_ai.data_source.results_count": metrics.resultsCount,
+    "chorus.data_source.operation": "search",
+    "chorus.data_source.query_length": metrics.query.length,
+    "chorus.data_source.results_count": metrics.resultsCount,
   });
 
   if (metrics.topScore !== undefined) {
-    span.setAttribute("gen_ai.data_source.top_score", metrics.topScore);
+    span.setAttribute("chorus.data_source.top_score", metrics.topScore);
   }
   if (metrics.latencyMs !== undefined) {
-    span.setAttribute("gen_ai.data_source.latency_ms", metrics.latencyMs);
+    span.setAttribute("chorus.data_source.latency_ms", metrics.latencyMs);
   }
 }
 
@@ -563,21 +598,18 @@ export function recordClaudeResponse(context: {
   if (!span) return;
 
   span.setAttributes({
-    // Response metrics
-    "chorus.response.length": context.responseLength,
-    "chorus.response.cached": context.cached,
     // Token metrics (OTel GenAI conventions)
     "gen_ai.usage.input_tokens": context.inputTokens,
     "gen_ai.usage.output_tokens": context.outputTokens,
-    "gen_ai.usage.total_tokens": context.inputTokens + context.outputTokens,
-    // Conversation context
-    "gen_ai.request.messages_count": context.messagesCount,
-    "gen_ai.request.has_knowledge_base": context.hasKnowledgeBase,
-    "gen_ai.response.cache_hit": context.cached,
+    // Chorus-specific response context
+    "chorus.response.length": context.responseLength,
+    "chorus.response.cached": context.cached,
+    "chorus.request.messages_count": context.messagesCount,
+    "chorus.request.has_knowledge_base": context.hasKnowledgeBase,
   });
 
   if (context.stopReason) {
-    span.setAttribute("gen_ai.response.finish_reason", context.stopReason);
+    span.setAttribute("gen_ai.response.finish_reasons", [context.stopReason]);
   }
 
   // Add span event for the completion
@@ -585,7 +617,6 @@ export function recordClaudeResponse(context: {
     "chorus.response.length": context.responseLength,
     "gen_ai.usage.input_tokens": context.inputTokens,
     "gen_ai.usage.output_tokens": context.outputTokens,
-    "gen_ai.response.cache_hit": context.cached,
   });
 }
 
@@ -773,18 +804,18 @@ export function recordGenAiLatency(latency: {
   const span = getActiveSpan();
   if (!span) return;
 
-  span.setAttribute("gen_ai.latency.total_generation_ms", latency.totalGenerationMs);
+  span.setAttribute("chorus.latency.total_generation_ms", latency.totalGenerationMs);
 
   // Seconds-unit attribute for Honeycomb HEATMAP/P99 queries
   const durationS = latency.totalGenerationMs / 1000;
-  span.setAttribute("gen_ai.client.operation.duration_s", durationS);
+  span.setAttribute("chorus.client.operation.duration_s", durationS);
 
   if (latency.timeToFirstTokenMs !== undefined) {
-    span.setAttribute("gen_ai.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
-    span.setAttribute("gen_ai.server.time_to_first_token_s", latency.timeToFirstTokenMs / 1000);
+    span.setAttribute("chorus.latency.time_to_first_token_ms", latency.timeToFirstTokenMs);
+    span.setAttribute("chorus.server.time_to_first_token_s", latency.timeToFirstTokenMs / 1000);
   } else if (latency.streaming === false) {
     // Non-streaming: TTFT ≈ total duration (server returns all at once)
-    span.setAttribute("gen_ai.server.time_to_first_token_s", durationS);
+    span.setAttribute("chorus.server.time_to_first_token_s", durationS);
   }
 }
 

@@ -15,9 +15,9 @@ import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache, w
 import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport, warmAmplitudeCache } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
 import { storeFeedbackRecord, updateFeedbackWithReaction, handleFeedbackPage } from "./feedback";
-import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
+  recordAgentInvocation,
   recordCommand,
   recordError,
   recordCategorizedError,
@@ -827,16 +827,13 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       eventType: "app_mention",
     });
 
-    // Add GenAI context to the current trace span (with defensive check for test env)
-    const span = trace.getActiveSpan();
-    if (span && typeof span.setAttributes === "function") {
-      span.setAttributes({
-        // GenAI context (OTel semantic conventions)
-        "gen_ai.operation.name": "chat",
-        "gen_ai.system": "anthropic",
-        "gen_ai.request.model": CLAUDE_MODEL,
-      });
-    }
+    // Record agent invocation context (OTel GenAI agent span conventions)
+    recordAgentInvocation({
+      name: "chorus",
+      description: "PDD chief of staff Slack bot",
+      requestModel: CLAUDE_MODEL,
+      conversationId: thread_ts ?? ts,
+    });
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
     const cleanedText = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
