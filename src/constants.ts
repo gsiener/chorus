@@ -56,5 +56,10 @@ export const PRIORITIES_CACHE_TTL_SECONDS = 28800; // 8 hours
 // Scheduled sync intervals
 export const DOC_BACKFILL_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Feedback log
+export const FEEDBACK_KV_PREFIX = "feedback:";
+export const FEEDBACK_TTL_SECONDS = 3888000; // 45 days
+export const FEEDBACK_METADATA_PROMPT_LENGTH = 100;
+
 // KV key prefixes for scheduled sync tracking
 export const LAST_BACKFILL_KEY = "sync:backfill:last";

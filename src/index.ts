@@ -14,6 +14,7 @@ import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./ch
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache, warmPrioritiesCache } from "./linear-priorities";
 import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport, warmAmplitudeCache } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
+import { storeFeedbackRecord, updateFeedbackWithReaction, handleFeedbackPage } from "./feedback";
 import { trace } from "@opentelemetry/api";
 import { instrument, ResolveConfigFn } from "@microlabs/otel-cf-workers";
 import {
@@ -741,6 +742,14 @@ export const handler = {
       return handleStreamApi(request, env);
     }
 
+    // Route /feedback to the feedback log page
+    if (url.pathname === "/feedback") {
+      if (!verifyApiKey(request, env)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      return handleFeedbackPage(env);
+    }
+
     // Route /slack/slash to slash command handler
     if (url.pathname === "/slack/slash") {
       return handleSlashCommand(request, env);
@@ -1070,6 +1079,18 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       messagesCount: messages.length,
       hasKnowledgeBase: true, // Knowledge base is always searched for context
     });
+
+    // Store feedback record for the feedback log (fire-and-forget)
+    storeFeedbackRecord(env, {
+      prompt: cleanedText,
+      response: result.text,
+      user,
+      channel,
+      ts: thinkingTs,
+      timestamp: new Date().toISOString(),
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    }).catch(err => console.warn("Feedback record store failed:", err));
   } catch (error) {
     console.error("Error handling mention:", error);
     if (error instanceof Error) {
@@ -1122,6 +1143,10 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
       channel: item.channel,
       messageTs: item.ts,
     });
+
+    // Update feedback record with reaction (fire-and-forget)
+    updateFeedbackWithReaction(env, item.channel, item.ts, feedback, user)
+      .catch(err => console.warn("Feedback record update failed:", err));
 
   } catch (error) {
     console.error("Error handling reaction:", error);

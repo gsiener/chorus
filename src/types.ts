@@ -107,6 +107,31 @@ export interface ClaudeResponse {
   };
 }
 
+// Feedback log types
+
+export interface FeedbackRecord {
+  prompt: string;
+  response: string;
+  user: string;
+  channel: string;
+  ts: string;               // Bot response message timestamp
+  timestamp: string;         // ISO 8601
+  inputTokens: number;
+  outputTokens: number;
+  feedback?: {
+    type: "positive" | "negative";
+    reactor: string;
+    reactedAt: string;
+  };
+}
+
+export interface FeedbackMetadata {
+  prompt: string;            // Truncated to 100 chars for KV list view
+  user: string;
+  feedback?: "positive" | "negative";
+  timestamp: string;
+}
+
 // Thread context types for conversation memory
 
 export interface ThreadContext {
