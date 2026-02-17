@@ -67,7 +67,7 @@ function cleanSlackMessage(text: string, botUserId: string): string {
 }
 
 export const CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
-const CLAUDE_MAX_TOKENS = 1000;
+const CLAUDE_MAX_TOKENS = 300;
 // Timeout for Claude API calls - leave margin before Cloudflare's 30s waitUntil limit
 const CLAUDE_API_TIMEOUT_MS = 25000;
 
