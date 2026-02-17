@@ -4,9 +4,9 @@ import {
   parseSearchCommand,
   parseCheckInCommand,
 } from "./parseCommands";
-import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction } from "./slack";
+import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError } from "./slack";
 import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
-import { TimeoutError } from "./http-utils";
+import { TimeoutError, NetworkError, RateLimitError, ServerError } from "./http-utils";
 import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
@@ -142,6 +142,94 @@ function verifyApiKey(request: Request, env: Env): boolean {
   }
   const token = authHeader.slice(7);
   return token === env.DOCS_API_KEY;
+}
+
+/**
+ * Handle /api/health - check connectivity to Slack, Claude, and KV
+ */
+async function handleHealth(request: Request, env: Env): Promise<Response> {
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (request.method !== "GET") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const start = Date.now();
+
+  const [slackResult, claudeResult, kvResult] = await Promise.allSettled([
+    // Slack: auth.test
+    (async () => {
+      const t0 = Date.now();
+      const res = await fetch("https://slack.com/api/auth.test", {
+        headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` },
+      });
+      const data = (await res.json()) as { ok: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error ?? "auth.test failed");
+      return { status: "ok" as const, latency_ms: Date.now() - t0 };
+    })(),
+
+    // Claude: lightweight /v1/messages call
+    (async () => {
+      const t0 = Date.now();
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 5,
+          messages: [{ role: "user", content: "Say OK" }],
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+      return { status: "ok" as const, latency_ms: Date.now() - t0 };
+    })(),
+
+    // KV: read-only get (key doesn't need to exist)
+    (async () => {
+      const t0 = Date.now();
+      await env.DOCS_KV.get("health:ping");
+      return { status: "ok" as const, latency_ms: Date.now() - t0 };
+    })(),
+  ]);
+
+  const checks = {
+    slack: slackResult.status === "fulfilled"
+      ? slackResult.value
+      : { status: "error" as const, error: slackResult.reason?.message ?? "unknown" },
+    claude: claudeResult.status === "fulfilled"
+      ? claudeResult.value
+      : { status: "error" as const, error: claudeResult.reason?.message ?? "unknown" },
+    kv: kvResult.status === "fulfilled"
+      ? kvResult.value
+      : { status: "error" as const, error: kvResult.reason?.message ?? "unknown" },
+  };
+
+  const allHealthy = checks.slack.status === "ok" && checks.claude.status === "ok" && checks.kv.status === "ok";
+
+  return new Response(JSON.stringify({
+    success: allHealthy,
+    status: allHealthy ? "healthy" : "degraded",
+    elapsed_ms: Date.now() - start,
+    checks,
+  }), {
+    status: allHealthy ? 200 : 503,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 /**
@@ -701,6 +789,11 @@ export const handler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // Route /api/health to the health check handler
+    if (url.pathname === "/api/health") {
+      return handleHealth(request, env);
+    }
+
     // Route /api/docs to the docs API handler
     if (url.pathname === "/api/docs") {
       return handleDocsApi(request, env);
@@ -805,6 +898,28 @@ export const handler = {
 // Default export wrapped with OpenTelemetry instrumentation
 // This sends traces directly to Honeycomb with full custom span attribute support
 export default instrument(handler, otelConfig);
+
+/**
+ * Map errors to user-friendly messages for Slack responses
+ */
+export function getUserFriendlyErrorMessage(error: unknown): string {
+  if (error instanceof TimeoutError) {
+    return "Sorry, my response took too long and timed out. Please try again or simplify your question.";
+  }
+  if (error instanceof RateLimitError) {
+    return "I'm getting too many requests right now. Please wait a moment and try again.";
+  }
+  if (error instanceof NetworkError) {
+    return "I'm having trouble connecting to one of my services. Please try again in a moment.";
+  }
+  if (error instanceof ServerError) {
+    return "One of the services I depend on is having issues. Please try again shortly.";
+  }
+  if (error instanceof SlackApiError) {
+    return "I ran into an issue communicating with Slack. Please try again.";
+  }
+  return "Sorry, I encountered an error processing your request.";
+}
 
 async function handleMention(payload: SlackEventCallback, env: Env): Promise<void> {
   const event = payload.event as SlackAppMentionEvent;
@@ -1093,11 +1208,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
       recordCategorizedError(error, "handleMention");
     }
 
-    // Provide user-friendly message for timeout errors
-    let errorMessage = "Sorry, I encountered an error processing your request.";
-    if (error instanceof TimeoutError) {
-      errorMessage = "Sorry, my response took too long and timed out. This can happen with complex questions. Please try again or simplify your question.";
-    }
+    const errorMessage = getUserFriendlyErrorMessage(error);
 
     // Update the thinking message if it was posted, otherwise post a new message
     if (thinkingTs) {

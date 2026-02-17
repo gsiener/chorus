@@ -16,7 +16,9 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
   instrument: (handler: unknown) => handler,
 }));
 
-import { handler } from "../index";
+import { handler, getUserFriendlyErrorMessage } from "../index";
+import { TimeoutError, NetworkError, RateLimitError, ServerError } from "../http-utils";
+import { SlackApiError } from "../slack";
 import type { Env } from "../types";
 
 describe("Worker", () => {
@@ -697,6 +699,216 @@ describe("Slash Commands", () => {
     const body = await response.json() as { response_type: string; text: string };
     expect(body.text).toContain("Unknown command");
     expect(body.text).toContain("/chorus");
+  });
+});
+
+describe("Health Endpoint", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-signing-secret",
+    ANTHROPIC_API_KEY: "sk-ant-test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_API_KEY: "test-api-key",
+    DOCS_KV: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn(),
+    } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  const mockCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("returns 401 without auth", async () => {
+    const request = new Request("https://example.com/api/health");
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(401);
+  });
+
+  it("returns 405 for POST method", async () => {
+    const request = new Request("https://example.com/api/health", {
+      method: "POST",
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(405);
+  });
+
+  it("returns 200 when all checks pass", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("slack.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, user_id: "U_BOT" }),
+        });
+      }
+      if (url.includes("anthropic.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ content: [{ type: "text", text: "OK" }] }),
+        });
+      }
+      return Promise.resolve({ ok: true });
+    }));
+
+    const request = new Request("https://example.com/api/health", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { success: boolean; status: string; checks: Record<string, { status: string }> };
+    expect(body.success).toBe(true);
+    expect(body.status).toBe("healthy");
+    expect(body.checks.slack.status).toBe("ok");
+    expect(body.checks.claude.status).toBe("ok");
+    expect(body.checks.kv.status).toBe("ok");
+  });
+
+  it("returns 503 when Slack check fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("slack.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "invalid_auth" }),
+        });
+      }
+      if (url.includes("anthropic.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ content: [{ type: "text", text: "OK" }] }),
+        });
+      }
+      return Promise.resolve({ ok: true });
+    }));
+
+    const request = new Request("https://example.com/api/health", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(503);
+    const body = await response.json() as { success: boolean; status: string; checks: Record<string, { status: string; error?: string }> };
+    expect(body.success).toBe(false);
+    expect(body.status).toBe("degraded");
+    expect(body.checks.slack.status).toBe("error");
+    expect(body.checks.slack.error).toContain("invalid_auth");
+  });
+
+  it("returns 503 when Claude check fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("slack.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, user_id: "U_BOT" }),
+        });
+      }
+      if (url.includes("anthropic.com")) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          text: () => Promise.resolve("invalid api key"),
+        });
+      }
+      return Promise.resolve({ ok: true });
+    }));
+
+    const request = new Request("https://example.com/api/health", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, mockEnv, mockCtx);
+
+    expect(response.status).toBe(503);
+    const body = await response.json() as { success: boolean; checks: Record<string, { status: string }> };
+    expect(body.success).toBe(false);
+    expect(body.checks.claude.status).toBe("error");
+  });
+
+  it("returns 503 when KV check fails", async () => {
+    const kvFailEnv: Env = {
+      ...mockEnv,
+      DOCS_KV: {
+        get: vi.fn().mockRejectedValue(new Error("KV unavailable")),
+        put: vi.fn(),
+      } as unknown as KVNamespace,
+    };
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
+      if (url.includes("slack.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, user_id: "U_BOT" }),
+        });
+      }
+      if (url.includes("anthropic.com")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ content: [{ type: "text", text: "OK" }] }),
+        });
+      }
+      return Promise.resolve({ ok: true });
+    }));
+
+    const request = new Request("https://example.com/api/health", {
+      headers: { Authorization: "Bearer test-api-key" },
+    });
+
+    const response = await handler.fetch(request, kvFailEnv, mockCtx);
+
+    expect(response.status).toBe(503);
+    const body = await response.json() as { success: boolean; checks: Record<string, { status: string; error?: string }> };
+    expect(body.success).toBe(false);
+    expect(body.checks.kv.status).toBe("error");
+    expect(body.checks.kv.error).toContain("KV unavailable");
+  });
+});
+
+describe("getUserFriendlyErrorMessage", () => {
+  it("returns timeout message for TimeoutError", () => {
+    expect(getUserFriendlyErrorMessage(new TimeoutError(30000))).toContain("timed out");
+  });
+
+  it("returns rate limit message for RateLimitError", () => {
+    expect(getUserFriendlyErrorMessage(new RateLimitError(1000))).toContain("too many requests");
+  });
+
+  it("returns network message for NetworkError", () => {
+    expect(getUserFriendlyErrorMessage(new NetworkError("connection failed"))).toContain("trouble connecting");
+  });
+
+  it("returns server message for ServerError", () => {
+    expect(getUserFriendlyErrorMessage(new ServerError(500, "internal"))).toContain("having issues");
+  });
+
+  it("returns Slack message for SlackApiError", () => {
+    expect(getUserFriendlyErrorMessage(new SlackApiError("channel_not_found", "postMessage"))).toContain("communicating with Slack");
+  });
+
+  it("returns generic message for unknown errors", () => {
+    expect(getUserFriendlyErrorMessage(new Error("something unexpected"))).toBe(
+      "Sorry, I encountered an error processing your request."
+    );
+  });
+
+  it("returns generic message for non-Error values", () => {
+    expect(getUserFriendlyErrorMessage("string error")).toBe(
+      "Sorry, I encountered an error processing your request."
+    );
   });
 });
 
