@@ -21,35 +21,53 @@ We use **Linear** to track tasks:
 
 **Git push policy:**
 
-- **Batch commits before pushing** - Quality tests run on push and cost money
-- Commit frequently, but push less often (batch multiple commits together)
-- Only push when explicitly asked or when a logical batch of work is complete
+* **Batch commits before pushing** - Quality tests run on push and cost money
+
+* Commit frequently, but push less often (batch multiple commits together)
+
+* Only push when explicitly asked or when a logical batch of work is complete
+
+**Commit squashing (turbocommit):**
+
+* This repo uses turbocommit for auto-generating commit messages
+
+* When reaching a meaningful milestone, squash all related commits into one clean commit before pushing
+
+* Use `git rebase` to squash — keep unrelated commits separate
+
+* Goal: each push should have clean, logical commits (one per feature/fix)
 
 **Creating issues:**
 
-- Associate new issues with the appropriate Linear project based on feature area:
+* Associate new issues with the appropriate Linear project based on feature area:
 
-| Feature Area | Project | ID |
-|---|---|---|
+| Feature Area            | Project                                                                                                     | ID                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Chorus (Slack bot core) | [Chorus: PDD chief of staff](https://linear.app/honeycombio/project/chorus-pdd-chief-of-staff-7af7396ddb5d) | `d581ee59-765e-4257-83f8-44e75620bac6` |
-| MCP | [MCP](https://linear.app/honeycombio/project/mcp-4ca66bea79ca) | `98e724fa-3dd2-4c44-8908-c768923c13d7` |
-| Anomaly Detection | [Anomaly Detection GA](https://linear.app/honeycombio/project/anomaly-detection-ga-e67e115c7145) | `54373c0c-1272-405e-b166-855ec31b43b3` |
+| MCP                     | [MCP](https://linear.app/honeycombio/project/mcp-4ca66bea79ca)                                              | `98e724fa-3dd2-4c44-8908-c768923c13d7` |
+| Anomaly Detection       | [Anomaly Detection GA](https://linear.app/honeycombio/project/anomaly-detection-ga-e67e115c7145)            | `54373c0c-1272-405e-b166-855ec31b43b3` |
 
-- Default to the **Chorus** project if the feature area is unclear
+* Default to the **Chorus** project if the feature area is unclear
 
 **Linear API access:**
 
-- API key is in `.env` as `LINEAR_API` (use `source .env` first)
-- Use the GraphQL API at `https://api.linear.app/graphql`
-- Team ID for PDD Leadership: `daa91240-92e1-4a78-8cc7-a53684a431b1`
+* API key is in `.env` as `LINEAR_API` (use `source .env` first)
+
+* Use the GraphQL API at `https://api.linear.app/graphql`
+
+* Team ID for PDD Leadership: `daa91240-92e1-4a78-8cc7-a53684a431b1`
 
 Workflow state IDs (PDD Leadership):
 
-- Backlog: `fe855cf8-1c24-48e2-98c7-347a001edf35`
-- Todo: `c15f7e13-c1e7-4d44-9baa-5a9eeb73c6a9`
-- In Progress: `c9ac7a4d-ba12-4a55-96c8-62674a1fe91f`
-- In Review: `5041ec12-a4f2-4d38-be9e-5bb7345341c5`
-- Done: `d75b66b4-4d28-4967-9b77-fef9b3d8c4fe`
+* Backlog: `fe855cf8-1c24-48e2-98c7-347a001edf35`
+
+* Todo: `c15f7e13-c1e7-4d44-9baa-5a9eeb73c6a9`
+
+* In Progress: `c9ac7a4d-ba12-4a55-96c8-62674a1fe91f`
+
+* In Review: `5041ec12-a4f2-4d38-be9e-5bb7345341c5`
+
+* Done: `d75b66b4-4d28-4967-9b77-fef9b3d8c4fe`
 
 Example to create an issue:
 
@@ -93,10 +111,13 @@ When a bug is reported, follow this workflow:
 
 This ensures we:
 
-- Have a clear record of the bug
-- Actually reproduce the issue before attempting fixes
-- Have verification that the fix works
-- Prevent future regressions with the new test coverage
+* Have a clear record of the bug
+
+* Actually reproduce the issue before attempting fixes
+
+* Have verification that the fix works
+
+* Prevent future regressions with the new test coverage
 
 ## Workflow Principles
 
@@ -104,10 +125,13 @@ This ensures we:
 
 Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions):
 
-- Create a Linear issue with detailed description including checkable markdown list
-- If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps, not just building
-- Write detailed specs in the Linear issue upfront to reduce ambiguity
+* Create a Linear issue with detailed description including checkable markdown list
+
+* If something goes sideways, STOP and re-plan immediately - don't keep pushing
+
+* Use plan mode for verification steps, not just building
+
+* Write detailed specs in the Linear issue upfront to reduce ambiguity
 
 Example Linear issue structure:
 
@@ -127,47 +151,63 @@ Example Linear issue structure:
 
 Use subagents liberally to keep main context window clean:
 
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
-- One focused task per subagent for better execution
-- This prevents context pollution and improves performance
+* Offload research, exploration, and parallel analysis to subagents
+
+* For complex problems, throw more compute at it via subagents
+
+* One focused task per subagent for better execution
+
+* This prevents context pollution and improves performance
 
 ### 3. Verification Before Done
 
 Never move a Linear issue to "Done" without proving it works:
 
-- Diff behavior between main and your changes when relevant
-- Ask yourself: "Would a staff engineer approve this?"
-- Run tests, check logs, demonstrate correctness
-- If you can't verify, leave in "In Review" for manual verification
+* Diff behavior between main and your changes when relevant
+
+* Ask yourself: "Would a staff engineer approve this?"
+
+* Run tests, check logs, demonstrate correctness
+
+* If you can't verify, leave in "In Review" for manual verification
 
 ### 4. Demand Elegance (Balanced)
 
 For non-trivial changes: pause and ask "is there a more elegant way?"
 
-- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
-- Skip this for simple, obvious fixes - don't over-engineer
-- Challenge your own work before presenting it
-- Balance elegance with practicality
+* If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+
+* Skip this for simple, obvious fixes - don't over-engineer
+
+* Challenge your own work before presenting it
+
+* Balance elegance with practicality
 
 ### 5. Self-Improvement Loop
 
 After ANY correction from the user, capture the lesson:
 
-- Create a new document in `docs/solutions/` with the pattern
-- Use YAML frontmatter (module, tags, symptoms, root_cause, resolution_type)
-- Write rules for yourself that prevent the same mistake
-- Build institutional knowledge over time
-- Review existing solutions at session start for relevant patterns
+* Create a new document in `docs/solutions/` with the pattern
+
+* Use YAML frontmatter (module, tags, symptoms, root\_cause, resolution\_type)
+
+* Write rules for yourself that prevent the same mistake
+
+* Build institutional knowledge over time
+
+* Review existing solutions at session start for relevant patterns
 
 ### 6. Self-Verification
 
 Never tell the user to try something when you can verify it yourself:
 
-- After deploying, check the GitHub Actions status and confirm success
-- After fixing a bug, test the fix via API or other available means
-- After making changes, run the tests yourself rather than asking the user to
-- Use available tools (curl, gh CLI, etc.) to validate your work before reporting done
+* After deploying, check the GitHub Actions status and confirm success
+
+* After fixing a bug, test the fix via API or other available means
+
+* After making changes, run the tests yourself rather than asking the user to
+
+* Use available tools (curl, gh CLI, etc.) to validate your work before reporting done
 
 ## Project Overview
 
@@ -175,11 +215,15 @@ Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using C
 
 ## Commands
 
-- `npm run dev` - Start local development server
-- `npm run deploy` - Deploy to Cloudflare Workers
-- `npm run typecheck` - Run TypeScript type checking
-- `npm test` - Run tests
-- `npm run test:watch` - Run tests in watch mode
+* `npm run dev` - Start local development server
+
+* `npm run deploy` - Deploy to Cloudflare Workers
+
+* `npm run typecheck` - Run TypeScript type checking
+
+* `npm test` - Run tests
+
+* `npm run test:watch` - Run tests in watch mode
 
 ## Testing Requirements
 
@@ -187,20 +231,25 @@ Chorus is a Cloudflare Worker-based Slack bot that responds to @mentions using C
 
 ## Architecture
 
-See [**ARCHITECTURE.md**](./ARCHITECTURE.md) for the comprehensive system design documentation.
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the comprehensive system design documentation.
 
 **When to reference ARCHITECTURE.md:**
 
-- Before making significant design decisions or adding new modules
-- When modifying data flow between components
-- When adding new integrations or storage patterns
+* Before making significant design decisions or adding new modules
+
+* When modifying data flow between components
+
+* When adding new integrations or storage patterns
 
 **When to update ARCHITECTURE.md:**
 
-- After adding new modules or major features
-- After changing data models or storage patterns
-- After adding new external integrations
-- After modifying the request flow or entry points
+* After adding new modules or major features
+
+* After changing data models or storage patterns
+
+* After adding new external integrations
+
+* After modifying the request flow or entry points
 
 **Quick reference:**
 
@@ -211,39 +260,49 @@ See [**ARCHITECTURE.md**](./ARCHITECTURE.md) for the comprehensive system design
 
 **Key files:**
 
-- `src/index.ts` - Worker entry point, routes Slack events, handles `app_mention`
-- `src/slack.ts` - Slack API: signature verification, thread fetching, message posting
-- `src/claude.ts` - Claude API integration, system prompt, message format conversion
-- `src/types.ts` - TypeScript interfaces for Slack events and API responses
+* `src/index.ts` - Worker entry point, routes Slack events, handles `app_mention`
+
+* `src/slack.ts` - Slack API: signature verification, thread fetching, message posting
+
+* `src/claude.ts` - Claude API integration, system prompt, message format conversion
+
+* `src/types.ts` - TypeScript interfaces for Slack events and API responses
 
 ## Environment Secrets
 
 Set via `npx wrangler secret put <NAME>`:
 
-- `SLACK_BOT_TOKEN` - Bot token for Slack API (`xoxb-...`)
-- `SLACK_SIGNING_SECRET` - For request verification
-- `ANTHROPIC_API_KEY` - Claude API key
-- `DOCS_API_KEY` - API key for console-based document management (REST API)
-- `LINEAR_API` - Linear API key for R&D Priorities integration
+* `SLACK_BOT_TOKEN` - Bot token for Slack API (`xoxb-...`)
 
-## R&D Priorities Integration
+* `SLACK_SIGNING_SECRET` - For request verification
 
-Chorus fetches R&D Priorities from Linear and includes them in Claude's system prompt. This allows Chorus to answer questions like "What are our top priorities?" or "Who owns X?"
+* `ANTHROPIC_API_KEY` - Claude API key
+
+* `DOCS_API_KEY` - API key for console-based document management (REST API)
+
+* `LINEAR_API` - Linear API key for R\&D Priorities integration
+
+## R\&D Priorities Integration
+
+Chorus fetches R\&D Priorities from Linear and includes them in Claude's system prompt. This allows Chorus to answer questions like "What are our top priorities?" or "Who owns X?"
 
 **Key files:**
 
-- `src/linear-priorities.ts` - Fetches and formats priorities from Linear
-- Linear parent initiative ID is defined in `RD_PRIORITIES_INITIATIVE_ID` constant
+* `src/linear-priorities.ts` - Fetches and formats priorities from Linear
+
+* Linear parent initiative ID is defined in `RD_PRIORITIES_INITIATIVE_ID` constant
 
 **Linear Structure:**
 
-- Parent Initiative linked to child initiatives via `initiativeRelations` with `sortOrder` for ranking
-- Each initiative has: owner, tech risk (🌶), theme, Slack channel in description
+* Parent Initiative linked to child initiatives via `initiativeRelations` with `sortOrder` for ranking
+
+* Each initiative has: owner, tech risk (🌶), theme, Slack channel in description
 
 **Debug/Test API Endpoints:**
 
-- `GET /api/debug/priorities` - Returns raw Linear priorities data (requires DOCS_API_KEY)
-- `POST /api/ask` - Ask Chorus a question directly via API (requires DOCS_API_KEY)
+* `GET /api/debug/priorities` - Returns raw Linear priorities data (requires DOCS\_API\_KEY)
+
+* `POST /api/ask` - Ask Chorus a question directly via API (requires DOCS\_API\_KEY)
 
 Example:
 
@@ -259,10 +318,13 @@ curl -s "$CHORUS_URL/api/ask" \
 
 **Updating Priorities in Linear:**
 
-- Use `initiativeUpdate` mutation to change initiative details
-- Use `initiativeRelationUpdate` mutation to change sortOrder (ranking)
-- Use `initiativeRelationCreate/Delete` to add/remove from roadmap
-- Use `initiativeToProjectCreate/Delete` to link/unlink projects
+* Use `initiativeUpdate` mutation to change initiative details
+
+* Use `initiativeRelationUpdate` mutation to change sortOrder (ranking)
+
+* Use `initiativeRelationCreate/Delete` to add/remove from roadmap
+
+* Use `initiativeToProjectCreate/Delete` to link/unlink projects
 
 The priorities cache has an 8-hour TTL and is warmed daily by the cron handler.
 
