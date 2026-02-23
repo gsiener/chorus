@@ -766,23 +766,50 @@ export const handler = {
 
     // Run tasks sequentially in a single waitUntil to avoid exceeding Worker CPU limits.
     // Previously, parallel ctx.waitUntil() calls caused exceededCpu kills.
+    // Each task is wrapped in try/catch so one failure doesn't skip the rest.
     ctx.waitUntil((async () => {
-      await sendWeeklyCheckins(env);
-
-      if (new Date(controller.scheduledTime).getUTCDay() === 1) {
-        await sendWeeklyMetricsReport(env);
+      try {
+        await sendWeeklyCheckins(env);
+      } catch (error) {
+        console.error("Scheduled task failed: sendWeeklyCheckins", error);
       }
 
-      const briefResult = await checkInitiativeBriefs(env);
-      console.log(
-        `Brief check complete: ${briefResult.initiativesChecked} checked, ` +
-          `${briefResult.missingBriefs.filter((m) => m.dmSent).length} DMs sent, ` +
-          `${briefResult.unmappedUsers.length} unmapped users`
-      );
+      if (new Date(controller.scheduledTime).getUTCDay() === 1) {
+        try {
+          await sendWeeklyMetricsReport(env);
+        } catch (error) {
+          console.error("Scheduled task failed: sendWeeklyMetricsReport", error);
+        }
+      }
 
-      await backfillIfNeeded(env);
-      await warmPrioritiesCache(env);
-      await warmAmplitudeCache(env);
+      try {
+        const briefResult = await checkInitiativeBriefs(env);
+        console.log(
+          `Brief check complete: ${briefResult.initiativesChecked} checked, ` +
+            `${briefResult.missingBriefs.filter((m) => m.dmSent).length} DMs sent, ` +
+            `${briefResult.unmappedUsers.length} unmapped users`
+        );
+      } catch (error) {
+        console.error("Scheduled task failed: checkInitiativeBriefs", error);
+      }
+
+      try {
+        await backfillIfNeeded(env);
+      } catch (error) {
+        console.error("Scheduled task failed: backfillIfNeeded", error);
+      }
+
+      try {
+        await warmPrioritiesCache(env);
+      } catch (error) {
+        console.error("Scheduled task failed: warmPrioritiesCache", error);
+      }
+
+      try {
+        await warmAmplitudeCache(env);
+      } catch (error) {
+        console.error("Scheduled task failed: warmAmplitudeCache", error);
+      }
     })());
   },
 

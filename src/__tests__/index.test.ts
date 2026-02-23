@@ -16,6 +16,49 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
   instrument: (handler: unknown) => handler,
 }));
 
+// Mock scheduled task dependencies for error isolation tests
+const mockSendWeeklyCheckins = vi.fn().mockResolvedValue({ success: true, message: "ok", sentTo: 0 });
+const mockSendWeeklyMetricsReport = vi.fn().mockResolvedValue({ success: true });
+const mockCheckInitiativeBriefs = vi.fn().mockResolvedValue({ initiativesChecked: 0, missingBriefs: [], unmappedUsers: [] });
+const mockBackfillIfNeeded = vi.fn().mockResolvedValue(undefined);
+const mockWarmPrioritiesCache = vi.fn().mockResolvedValue(undefined);
+const mockWarmAmplitudeCache = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../checkins", () => ({
+  sendWeeklyCheckins: (...args: unknown[]) => mockSendWeeklyCheckins(...args),
+  listUserCheckIns: vi.fn(),
+  formatCheckInHistory: vi.fn(),
+}));
+
+vi.mock("../amplitude", () => ({
+  sendWeeklyMetricsReport: (...args: unknown[]) => mockSendWeeklyMetricsReport(...args),
+  getAmplitudeMetrics: vi.fn(),
+  clearAmplitudeCache: vi.fn(),
+  sendTestMetricsReport: vi.fn(),
+  warmAmplitudeCache: (...args: unknown[]) => mockWarmAmplitudeCache(...args),
+}));
+
+vi.mock("../brief-checker", () => ({
+  checkInitiativeBriefs: (...args: unknown[]) => mockCheckInitiativeBriefs(...args),
+  formatBriefCheckResults: vi.fn(),
+}));
+
+vi.mock("../docs", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    backfillIfNeeded: (...args: unknown[]) => mockBackfillIfNeeded(...args),
+  };
+});
+
+vi.mock("../linear-priorities", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    warmPrioritiesCache: (...args: unknown[]) => mockWarmPrioritiesCache(...args),
+  };
+});
+
 import { handler, getUserFriendlyErrorMessage } from "../index";
 import { TimeoutError, NetworkError, RateLimitError, ServerError } from "../http-utils";
 import { SlackApiError } from "../slack";
@@ -909,6 +952,82 @@ describe("getUserFriendlyErrorMessage", () => {
     expect(getUserFriendlyErrorMessage("string error")).toBe(
       "Sorry, I encountered an error processing your request."
     );
+  });
+});
+
+describe("Scheduled handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSendWeeklyCheckins.mockResolvedValue({ success: true, message: "ok", sentTo: 0 });
+    mockSendWeeklyMetricsReport.mockResolvedValue({ success: true });
+    mockCheckInitiativeBriefs.mockResolvedValue({ initiativesChecked: 0, missingBriefs: [], unmappedUsers: [] });
+    mockBackfillIfNeeded.mockResolvedValue(undefined);
+    mockWarmPrioritiesCache.mockResolvedValue(undefined);
+    mockWarmAmplitudeCache.mockResolvedValue(undefined);
+  });
+
+  function createMockScheduledController(day: number): ScheduledController {
+    // Create a date for the given day of week (0=Sun, 1=Mon, etc.)
+    // Find next occurrence of that day from a known Monday (Feb 23, 2026)
+    const base = new Date("2026-02-22T14:00:00Z"); // Sunday
+    base.setUTCDate(base.getUTCDate() + day);
+    return {
+      scheduledTime: base.getTime(),
+      cron: "0 14 * * *",
+      noRetry: vi.fn(),
+    } as unknown as ScheduledController;
+  }
+
+  const mockEnv = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_SIGNING_SECRET: "test",
+    ANTHROPIC_API_KEY: "sk-test",
+    HONEYCOMB_API_KEY: "test",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn(), delete: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  } as unknown as Env;
+
+  it("sends weekly metrics report on Mondays", async () => {
+    const controller = createMockScheduledController(1); // Monday
+    const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+
+    await handler.scheduled(controller, mockEnv, ctx);
+    // waitUntil receives an async function — execute it
+    const waitUntilFn = vi.mocked(ctx.waitUntil).mock.calls[0][0] as Promise<void>;
+    await waitUntilFn;
+
+    expect(mockSendWeeklyMetricsReport).toHaveBeenCalled();
+  });
+
+  it("does not send weekly metrics report on non-Mondays", async () => {
+    const controller = createMockScheduledController(3); // Wednesday
+    const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+
+    await handler.scheduled(controller, mockEnv, ctx);
+    const waitUntilFn = vi.mocked(ctx.waitUntil).mock.calls[0][0] as Promise<void>;
+    await waitUntilFn;
+
+    expect(mockSendWeeklyMetricsReport).not.toHaveBeenCalled();
+  });
+
+  it("continues executing subsequent tasks when an earlier task throws", async () => {
+    // Simulate sendWeeklyCheckins throwing an error
+    mockSendWeeklyCheckins.mockRejectedValue(new Error("checkin failure"));
+
+    const controller = createMockScheduledController(1); // Monday
+    const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
+
+    await handler.scheduled(controller, mockEnv, ctx);
+    const waitUntilFn = vi.mocked(ctx.waitUntil).mock.calls[0][0] as Promise<void>;
+    // Should NOT throw despite sendWeeklyCheckins failing
+    await waitUntilFn;
+
+    // All subsequent tasks should still run
+    expect(mockSendWeeklyMetricsReport).toHaveBeenCalled();
+    expect(mockCheckInitiativeBriefs).toHaveBeenCalled();
+    expect(mockWarmPrioritiesCache).toHaveBeenCalled();
+    expect(mockWarmAmplitudeCache).toHaveBeenCalled();
   });
 });
 
