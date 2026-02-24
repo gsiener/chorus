@@ -26,13 +26,13 @@
     ]
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.12.5",
-    "@cloudflare/workers-types": "^4.20260120.0",
+    "@cloudflare/vitest-pool-workers": "^0.12.16",
+    "@cloudflare/workers-types": "^4.20260302.0",
     "@types/node": "^22.15.0",
-    "forbid-junk-object-types": "^1.0.0",
+    "forbid-junk-object-types": "^1.2.0",
     "typescript": "^5.7.2",
     "vitest": "3.2.x",
-    "wrangler": "^4.59.3"
+    "wrangler": "^4.68.0"
   },
   "dependencies": {
     "@microlabs/otel-cf-workers": "^1.0.0-rc.52",
