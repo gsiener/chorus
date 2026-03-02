@@ -400,29 +400,47 @@ async function fetchMTTI(
   return Math.round(avgSeries(result));
 }
 
+// Saved Amplitude chart: "MCP & Canvas Usage" — pct_dau for canvas+mcp combined,
+// excluding honeycomb.io users. Using the chart API ensures we stay in sync with
+// the official definition without replicating its inline custom event structure.
+const CANVAS_MCP_CHART_ID = "qk5s0mro";
+
 async function fetchCanvasMCPUsers(
   start: string,
   end: string,
   env: Env,
 ): Promise<number> {
-  // Composite: canvas-user-message-sent OR open-in-canvas-clicked OR mcp-session-started
-  // Fetch each separately and take unique users (approximate via max)
-  const [canvas, openCanvas, mcp] = await Promise.all([
-    querySegmentation(
-      { e: { event_type: "canvas-user-message-sent" }, start, end, m: "uniques", i: 7 },
-      env,
-    ),
-    querySegmentation(
-      { e: { event_type: "open-in-canvas-clicked" }, start, end, m: "uniques", i: 7 },
-      env,
-    ),
-    querySegmentation(
-      { e: { event_type: "mcp-session-started" }, start, end, m: "uniques", i: 7 },
-      env,
-    ),
-  ]);
-  // Sum unique users across features (slight overcount for users using multiple)
-  return lastValue(canvas) + lastValue(openCanvas) + lastValue(mcp);
+  const url = new URL(`${AMPLITUDE_API_URL}/charts/${CANVAS_MCP_CHART_ID}/result`);
+  url.searchParams.set("start", start);
+  url.searchParams.set("end", end);
+
+  return fetchWithRetry(async () => {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        headers: { Authorization: buildAuthHeader(env) },
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Amplitude chart error: ${response.status} - ${text}`);
+      throw new Error(`Amplitude API error: ${response.status}`);
+    }
+
+    const result = await response.json() as { data?: { series?: number[][] } };
+    // series[0] is the combined canvas+mcp event (first series in the chart)
+    const series = result.data?.series?.[0] ?? [];
+    if (!series.length) return 0;
+    // pct_dau values are fractions (0–1); average across the period → percentage
+    const avg = series.reduce((s, v) => s + v, 0) / series.length;
+    return Math.round(avg * 1000) / 10; // e.g. 0.157 → 15.7
+  }, "canvas-mcp-chart");
 }
 
 async function fetchNewEnterpriseUsers(
@@ -726,7 +744,8 @@ export async function fetchAllMetrics(env: Env): Promise<AmplitudeMetrics> {
     metric("Week 1 Retention", "Activation & Retention",
       Math.round(retentionCurrent * 10) / 10, Math.round(retentionPrevious * 10) / 10, "%"),
     metric("MTTI (Trace Viewers)", "Activation & Retention", mttiCurrent, mttiPrevious, "users"),
-    metric("Canvas & MCP Users", "Feature Adoption", canvasCurrent, canvasPrevious, "users"),
+    metric("Canvas & MCP Users", "Feature Adoption",
+      Math.round(canvasCurrent * 10) / 10, Math.round(canvasPrevious * 10) / 10, "% DAU"),
     metric("Board Creates", "Feature Adoption", boardsCurrent, boardsPrevious, "total"),
     metric("SLO Engagement", "Feature Adoption", sloCurrent, sloPrevious, "users"),
     metric("Sharing Users", "Feature Adoption", sharingCurrent, sharingPrevious, "users"),
