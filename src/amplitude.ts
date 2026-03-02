@@ -22,7 +22,12 @@ const CACHE_STORE_TTL_SECONDS = AMPLITUDE_CACHE_TTL_SECONDS * 2;
 // Retry configuration
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 500;
-const BATCH_SIZE = 6;
+// Larger batches (12 vs 6) reduce total wall time: ceil(23/12)=2 batches × 10s timeout = 20s max,
+// comfortably under the 30s CF Workers wall time limit.
+const BATCH_SIZE = 12;
+// Per-request timeout: prevents individual slow Amplitude calls from hanging indefinitely.
+// AbortError is non-retryable so timed-out calls fail fast without burning retry budget.
+const FETCH_TIMEOUT_MS = 10_000;
 
 // Slack channel for weekly reports
 const WEEKLY_REPORT_CHANNEL = "CCESHFY67"; // #product-management
@@ -216,9 +221,17 @@ async function querySegmentation(
     if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
     if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
 
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: buildAuthHeader(env) },
-    });
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        headers: { Authorization: buildAuthHeader(env) },
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -255,9 +268,17 @@ async function queryRetention(
     if (params.i !== undefined) url.searchParams.set("i", String(params.i));
     if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
 
-    const response = await fetch(url.toString(), {
-      headers: { Authorization: buildAuthHeader(env) },
-    });
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        headers: { Authorization: buildAuthHeader(env) },
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -981,12 +1002,15 @@ export async function getAmplitudeMetrics(
 }
 
 /**
- * Get metrics from cache or fetch fresh (for report sending)
+ * Get metrics from cache or fetch fresh (for report sending).
+ * Prefers cached data (even stale) since the daily cron pre-warms the cache
+ * 30 minutes before the metrics report cron runs. Falls back to a fresh fetch
+ * only if the cache is completely empty (e.g. cold start).
  */
 async function getCachedOrFetchMetrics(env: Env): Promise<AmplitudeMetrics> {
-  const data = await getOrRefreshMetrics(env);
-  if (data) return data;
-  // Fallback: if lock prevented fetch and no cache, force fetch
+  const cached = await getOrRefreshMetrics(env, true); // cacheOnly=true: accept stale
+  if (cached) return cached;
+  // Cold start: no cache at all — fetch fresh (bounded by per-request timeouts)
   return fetchAllMetrics(env);
 }
 

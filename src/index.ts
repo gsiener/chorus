@@ -762,24 +762,40 @@ export const handler = {
    * Handle scheduled cron triggers (weekly check-ins and brief checker)
    */
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log("Running scheduled tasks at", new Date(controller.scheduledTime).toISOString());
+    console.log("Running scheduled tasks at", new Date(controller.scheduledTime).toISOString(), "cron:", controller.cron);
 
-    // Run tasks sequentially in a single waitUntil to avoid exceeding Worker CPU limits.
-    // Previously, parallel ctx.waitUntil() calls caused exceededCpu kills.
-    // Each task is wrapped in try/catch so one failure doesn't skip the rest.
-    ctx.waitUntil((async () => {
-      try {
-        await sendWeeklyCheckins(env);
-      } catch (error) {
-        console.error("Scheduled task failed: sendWeeklyCheckins", error);
-      }
-
-      if (new Date(controller.scheduledTime).getUTCDay() === 1) {
+    // Monday 9:30am ET (30 14 * * 1): dedicated metrics report cron.
+    // Runs 30 minutes after the daily cron so the Amplitude cache is pre-warmed
+    // and the report posts instantly without competing for CPU/wall time.
+    if (controller.cron === "30 14 * * 1") {
+      ctx.waitUntil((async () => {
         try {
           await sendWeeklyMetricsReport(env);
         } catch (error) {
           console.error("Scheduled task failed: sendWeeklyMetricsReport", error);
         }
+      })());
+      return;
+    }
+
+    // Daily 9am ET (0 14 * * *): check-ins, brief checks, and cache warming.
+    // Run tasks sequentially in a single waitUntil to avoid exceeding Worker CPU limits.
+    // Previously, parallel ctx.waitUntil() calls caused exceededCpu kills.
+    // Each task is wrapped in try/catch so one failure doesn't skip the rest.
+    //
+    // warmAmplitudeCache runs FIRST so it succeeds even if later tasks hit the CPU limit.
+    // The Monday metrics cron (30 14 * * 1) relies on this cache being warm.
+    ctx.waitUntil((async () => {
+      try {
+        await warmAmplitudeCache(env);
+      } catch (error) {
+        console.error("Scheduled task failed: warmAmplitudeCache", error);
+      }
+
+      try {
+        await sendWeeklyCheckins(env);
+      } catch (error) {
+        console.error("Scheduled task failed: sendWeeklyCheckins", error);
       }
 
       try {
@@ -803,12 +819,6 @@ export const handler = {
         await warmPrioritiesCache(env);
       } catch (error) {
         console.error("Scheduled task failed: warmPrioritiesCache", error);
-      }
-
-      try {
-        await warmAmplitudeCache(env);
-      } catch (error) {
-        console.error("Scheduled task failed: warmAmplitudeCache", error);
       }
     })());
   },

@@ -25,9 +25,12 @@ binding = "AI"
 # - COMPANY_NAME
 # - RD_PRIORITIES_INITIATIVE_ID
 
-# Cron trigger for DM check-ins (daily 9am ET / 14:00 UTC)
+# Cron triggers:
+#   0 14 * * *   - Daily 9am ET: check-ins, brief checks, cache warming
+#   30 14 * * 1  - Monday 9:30am ET: weekly product metrics report (separate so it
+#                  runs against a pre-warmed cache and doesn't compete for CPU/wall time)
 [triggers]
-crons = ["0 14 * * *"]
+crons = ["0 14 * * *", "30 14 * * 1"]
 
 # Native OpenTelemetry export to Honeycomb
 # Destinations configured in Cloudflare Dashboard:

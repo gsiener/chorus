@@ -988,20 +988,25 @@ describe("Scheduled handler", () => {
     AI: { run: vi.fn() } as unknown as Ai,
   } as unknown as Env;
 
-  it("sends weekly metrics report on Mondays", async () => {
-    const controller = createMockScheduledController(1); // Monday
+  it("sends weekly metrics report when triggered by the dedicated metrics cron", async () => {
+    const controller = {
+      scheduledTime: new Date("2026-02-23T14:30:00Z").getTime(), // Monday 14:30 UTC
+      cron: "30 14 * * 1",
+      noRetry: vi.fn(),
+    } as unknown as ScheduledController;
     const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 
     await handler.scheduled(controller, mockEnv, ctx);
-    // waitUntil receives an async function — execute it
     const waitUntilFn = vi.mocked(ctx.waitUntil).mock.calls[0][0] as Promise<void>;
     await waitUntilFn;
 
     expect(mockSendWeeklyMetricsReport).toHaveBeenCalled();
+    // Daily tasks should NOT run in the metrics cron
+    expect(mockSendWeeklyCheckins).not.toHaveBeenCalled();
   });
 
-  it("does not send weekly metrics report on non-Mondays", async () => {
-    const controller = createMockScheduledController(3); // Wednesday
+  it("does not send weekly metrics report from the daily cron", async () => {
+    const controller = createMockScheduledController(1); // Monday, but daily cron
     const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 
     await handler.scheduled(controller, mockEnv, ctx);
@@ -1015,7 +1020,7 @@ describe("Scheduled handler", () => {
     // Simulate sendWeeklyCheckins throwing an error
     mockSendWeeklyCheckins.mockRejectedValue(new Error("checkin failure"));
 
-    const controller = createMockScheduledController(1); // Monday
+    const controller = createMockScheduledController(1); // Monday, daily cron
     const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 
     await handler.scheduled(controller, mockEnv, ctx);
@@ -1023,8 +1028,7 @@ describe("Scheduled handler", () => {
     // Should NOT throw despite sendWeeklyCheckins failing
     await waitUntilFn;
 
-    // All subsequent tasks should still run
-    expect(mockSendWeeklyMetricsReport).toHaveBeenCalled();
+    // All subsequent daily tasks should still run
     expect(mockCheckInitiativeBriefs).toHaveBeenCalled();
     expect(mockWarmPrioritiesCache).toHaveBeenCalled();
     expect(mockWarmAmplitudeCache).toHaveBeenCalled();
