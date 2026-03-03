@@ -42,11 +42,6 @@ export const MAX_TOTAL_KB_SIZE = 200000; // 200 KB total
 export const MAX_TITLE_LENGTH = 100;
 export const DEFAULT_DOC_PAGE_SIZE = 10;
 
-// Check-in intervals
-export const MIN_CHECKIN_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days (production)
-export const TEST_CHECKIN_INTERVAL_MS = 20 * 60 * 60 * 1000; // 20 hours (test mode)
-export const CHECKIN_KV_TTL_SECONDS = 60 * 60 * 24 * 14; // 2 weeks
-
 // Cache TTLs
 export const BOT_ID_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 export const USER_INFO_CACHE_TTL_SECONDS = 60 * 60; // 1 hour

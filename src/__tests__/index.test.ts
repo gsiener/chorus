@@ -17,17 +17,15 @@ vi.mock("@microlabs/otel-cf-workers", () => ({
 }));
 
 // Mock scheduled task dependencies for error isolation tests
-const mockSendWeeklyCheckins = vi.fn().mockResolvedValue({ success: true, message: "ok", sentTo: 0 });
+const mockSendDailyFeedbackDigest = vi.fn().mockResolvedValue({ success: true, message: "ok" });
 const mockSendWeeklyMetricsReport = vi.fn().mockResolvedValue({ success: true });
 const mockCheckInitiativeBriefs = vi.fn().mockResolvedValue({ initiativesChecked: 0, missingBriefs: [], unmappedUsers: [] });
 const mockBackfillIfNeeded = vi.fn().mockResolvedValue(undefined);
 const mockWarmPrioritiesCache = vi.fn().mockResolvedValue(undefined);
 const mockWarmAmplitudeCache = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("../checkins", () => ({
-  sendWeeklyCheckins: (...args: unknown[]) => mockSendWeeklyCheckins(...args),
-  listUserCheckIns: vi.fn(),
-  formatCheckInHistory: vi.fn(),
+vi.mock("../feedback-digest", () => ({
+  sendDailyFeedbackDigest: (...args: unknown[]) => mockSendDailyFeedbackDigest(...args),
 }));
 
 vi.mock("../amplitude", () => ({
@@ -958,7 +956,7 @@ describe("getUserFriendlyErrorMessage", () => {
 describe("Scheduled handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSendWeeklyCheckins.mockResolvedValue({ success: true, message: "ok", sentTo: 0 });
+    mockSendDailyFeedbackDigest.mockResolvedValue({ success: true, message: "ok", sentTo: 0 });
     mockSendWeeklyMetricsReport.mockResolvedValue({ success: true });
     mockCheckInitiativeBriefs.mockResolvedValue({ initiativesChecked: 0, missingBriefs: [], unmappedUsers: [] });
     mockBackfillIfNeeded.mockResolvedValue(undefined);
@@ -1002,7 +1000,7 @@ describe("Scheduled handler", () => {
 
     expect(mockSendWeeklyMetricsReport).toHaveBeenCalled();
     // Daily tasks should NOT run in the metrics cron
-    expect(mockSendWeeklyCheckins).not.toHaveBeenCalled();
+    expect(mockSendDailyFeedbackDigest).not.toHaveBeenCalled();
   });
 
   it("does not send weekly metrics report from the daily cron", async () => {
@@ -1017,15 +1015,15 @@ describe("Scheduled handler", () => {
   });
 
   it("continues executing subsequent tasks when an earlier task throws", async () => {
-    // Simulate sendWeeklyCheckins throwing an error
-    mockSendWeeklyCheckins.mockRejectedValue(new Error("checkin failure"));
+    // Simulate sendDailyFeedbackDigest throwing an error
+    mockSendDailyFeedbackDigest.mockRejectedValue(new Error("digest failure"));
 
     const controller = createMockScheduledController(1); // Monday, daily cron
     const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 
     await handler.scheduled(controller, mockEnv, ctx);
     const waitUntilFn = vi.mocked(ctx.waitUntil).mock.calls[0][0] as Promise<void>;
-    // Should NOT throw despite sendWeeklyCheckins failing
+    // Should NOT throw despite sendDailyFeedbackDigest failing
     await waitUntilFn;
 
     // All subsequent daily tasks should still run

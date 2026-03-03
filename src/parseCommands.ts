@@ -97,25 +97,3 @@ export function parseSearchCommand(text: string, botUserId: string): SearchComma
 }
 
 // Check-in command types
-export type CheckInCommand = { type: "history"; limit?: number };
-
-/**
- * Parse check-in commands from message text
- *
- * Supported commands:
- * - "checkin history" or "check-in history" [--limit N] - Show check-in history
- *
- * @returns Parsed command or null if not a check-in command
- */
-export function parseCheckInCommand(text: string, botUserId: string): CheckInCommand | null {
-  const cleaned = cleanText(text, botUserId);
-
-  // Match: checkin history or check-in history with optional --limit N
-  if (/^check-?in\s+history(\s+--limit\s+\d+)?$/i.test(cleaned)) {
-    const limitMatch = cleaned.match(/--limit\s+(\d+)/i);
-    const limit = limitMatch ? parseInt(limitMatch[1], 10) : undefined;
-    return { type: "history", limit };
-  }
-
-  return null;
-}

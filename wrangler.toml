@@ -24,9 +24,10 @@ binding = "AI"
 # - HONEYCOMB_API_KEY
 # - COMPANY_NAME
 # - RD_PRIORITIES_INITIATIVE_ID
+# - FEEDBACK_DIGEST_USER
 
 # Cron triggers:
-#   0 14 * * *   - Daily 9am ET: check-ins, brief checks, cache warming
+#   0 14 * * *   - Daily 9am ET: feedback digest, brief checks, cache warming
 #   30 14 * * 1  - Monday 9:30am ET: weekly product metrics report (separate so it
 #                  runs against a pre-warmed cache and doesn't compete for CPU/wall time)
 [triggers]

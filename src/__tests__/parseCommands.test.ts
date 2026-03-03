@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDocCommand, parseSearchCommand, parseCheckInCommand } from "../parseCommands";
+import { parseDocCommand, parseSearchCommand } from "../parseCommands";
 
 describe("parseDocCommand", () => {
   const botUserId = "U123BOT";
@@ -60,25 +60,6 @@ describe("parseSearchCommand", () => {
 
   it("returns null for non-search commands", () => {
     const result = parseSearchCommand(`<@${botUserId}> hello world`, botUserId);
-    expect(result).toBeNull();
-  });
-});
-
-describe("parseCheckInCommand", () => {
-  const botUserId = "U123BOT";
-
-  it("parses 'checkin history'", () => {
-    const result = parseCheckInCommand(`<@${botUserId}> checkin history`, botUserId);
-    expect(result).toEqual({ type: "history" });
-  });
-
-  it("parses 'check-in history --limit 5'", () => {
-    const result = parseCheckInCommand(`<@${botUserId}> check-in history --limit 5`, botUserId);
-    expect(result).toEqual({ type: "history", limit: 5 });
-  });
-
-  it("returns null for non-checkin commands", () => {
-    const result = parseCheckInCommand(`<@${botUserId}> hello world`, botUserId);
     expect(result).toBeNull();
   });
 });

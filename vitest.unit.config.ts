@@ -42,7 +42,7 @@ export default defineConfig({
       "src/__tests__/slack.test.ts",
       "src/__tests__/docs.test.ts",
       "src/__tests__/initiatives.test.ts",
-      "src/__tests__/checkins.test.ts",
+      "src/__tests__/feedback-digest.test.ts",
       "src/__tests__/thread-context.test.ts",
       "src/__tests__/initiative-nlp.test.ts",
       "src/__tests__/http-utils.test.ts",

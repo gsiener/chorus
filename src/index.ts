@@ -2,7 +2,6 @@ import type { Env, SlackPayload, SlackEventCallback, SlackReactionAddedEvent, Sl
 import {
   parseDocCommand,
   parseSearchCommand,
-  parseCheckInCommand,
 } from "./parseCommands";
 import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError } from "./slack";
 import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
@@ -10,7 +9,7 @@ import { TimeoutError, NetworkError, RateLimitError, ServerError } from "./http-
 import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
-import { sendWeeklyCheckins, listUserCheckIns, formatCheckInHistory } from "./checkins";
+import { sendDailyFeedbackDigest } from "./feedback-digest";
 import { getPrioritiesContext, fetchPriorityInitiatives, clearPrioritiesCache, warmPrioritiesCache } from "./linear-priorities";
 import { getAmplitudeMetrics, clearAmplitudeCache, sendWeeklyMetricsReport, sendTestMetricsReport, warmAmplitudeCache } from "./amplitude";
 import { checkInitiativeBriefs, formatBriefCheckResults } from "./brief-checker";
@@ -233,7 +232,7 @@ async function handleHealth(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * Handle /api/test-checkin - trigger a test check-in DM
+ * Handle /api/test-checkin - trigger a test feedback digest DM
  */
 async function handleTestCheckin(request: Request, env: Env): Promise<Response> {
   // Verify API key
@@ -251,8 +250,8 @@ async function handleTestCheckin(request: Request, env: Env): Promise<Response> 
     });
   }
 
-  console.log("Manual test check-in triggered via API");
-  const result = await sendWeeklyCheckins(env);
+  console.log("Manual feedback digest triggered via API");
+  const result = await sendDailyFeedbackDigest(env);
 
   return new Response(JSON.stringify(result), {
     status: result.success ? 200 : 500,
@@ -793,9 +792,9 @@ export const handler = {
       }
 
       try {
-        await sendWeeklyCheckins(env);
+        await sendDailyFeedbackDigest(env);
       } catch (error) {
-        console.error("Scheduled task failed: sendWeeklyCheckins", error);
+        console.error("Scheduled task failed: sendDailyFeedbackDigest", error);
       }
 
       try {
@@ -1131,20 +1130,6 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
 
       await postMessage(channel, response, threadTs, env);
       return;
-    }
-
-    // Check for check-in commands
-    const checkInCommand = parseCheckInCommand(text, botUserId);
-
-    if (checkInCommand) {
-      recordCommand(`checkin:${checkInCommand.type}`);
-
-      if (checkInCommand.type === "history") {
-        const history = await listUserCheckIns(user, env, checkInCommand.limit);
-        const response = formatCheckInHistory(history);
-        await postMessage(channel, response, threadTs, env);
-        return;
-      }
     }
 
     // Check for check-briefs command

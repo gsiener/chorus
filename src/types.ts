@@ -7,7 +7,7 @@ export interface Env {
   DOCS_API_KEY?: string;
   AMPLITUDE_API_KEY?: string;
   AMPLITUDE_API_SECRET?: string;
-  TEST_CHECKIN_USER?: string; // When set, only send check-ins to this user (for testing)
+  FEEDBACK_DIGEST_USER?: string; // Slack user ID to receive daily feedback digest DMs
   RD_PRIORITIES_INITIATIVE_ID?: string; // Linear parent initiative ID for R&D Priorities
   COMPANY_NAME?: string; // Company name used in system prompt context (default: "the company")
   DOCS_KV: KVNamespace;
