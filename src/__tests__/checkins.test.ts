@@ -31,6 +31,8 @@ function makeRelation(overrides: {
   sortOrder?: number;
   ownerEmail?: string;
   ownerName?: string;
+  targetDate?: string | null;
+  projects?: Array<{ name: string; status: { name: string }; progress: number }>;
 }) {
   return {
     sortOrder: overrides.sortOrder ?? 1,
@@ -39,13 +41,13 @@ function makeRelation(overrides: {
       name: overrides.name,
       description: null,
       status: overrides.status ?? "Started",
-      targetDate: null,
+      targetDate: overrides.targetDate ?? null,
       url: `https://linear.app/test/${overrides.name}`,
       content: null,
       owner: overrides.ownerEmail
         ? { name: overrides.ownerName ?? "Test User", email: overrides.ownerEmail }
         : null,
-      projects: { nodes: [] },
+      projects: { nodes: overrides.projects ?? [] },
     },
   };
 }
@@ -241,6 +243,85 @@ describe("Weekly Check-ins", () => {
     expect(history.length).toBe(1);
     expect(history[0].initiativeCount).toBe(1);
     expect(history[0].sentAt).toBeDefined();
+  });
+
+  it("includes initiative details and confirmation CTA in message", async () => {
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "Anomaly Detection",
+        status: "Started",
+        sortOrder: 3,
+        ownerEmail: "alice@example.com",
+        targetDate: "2026-06-30",
+        projects: [
+          { name: "AD Backend", status: { name: "In Progress" }, progress: 0.45 },
+        ],
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
+    mockExtractMetadata.mockReturnValue({
+      techRisk: "🌶️🌶️",
+      theme: "Observability",
+      slackChannel: "#proj-anomaly",
+    });
+
+    let sentMessage = "";
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: RequestInit) => {
+      const body = opts?.body ? String(opts.body) : "";
+      if (url.toString().includes("chat.postMessage")) {
+        const parsed = JSON.parse(body);
+        sentMessage = parsed.text || "";
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
+      };
+    }));
+
+    await sendWeeklyCheckins(mockEnv);
+
+    // Should include initiative details
+    expect(sentMessage).toContain("Anomaly Detection");
+    expect(sentMessage).toContain("2026-06-30");
+    expect(sentMessage).toContain("View in Linear");
+    expect(sentMessage).toContain("#proj-anomaly");
+    // Should include confirmation CTA
+    expect(sentMessage).toContain("Everything look right?");
+    expect(sentMessage).toContain("no action needed");
+  });
+
+  it("shows TBD for missing target date and no active projects message", async () => {
+    mockFetchPriorities.mockResolvedValue([
+      makeRelation({
+        name: "New Initiative",
+        status: "Planned",
+        sortOrder: 7,
+        ownerEmail: "alice@example.com",
+      }),
+    ]);
+    mockResolveOwnerSlackIds.mockResolvedValue(
+      new Map([["alice@example.com", "U123"]])
+    );
+
+    let sentMessage = "";
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: RequestInit) => {
+      const body = opts?.body ? String(opts.body) : "";
+      if (url.toString().includes("chat.postMessage")) {
+        const parsed = JSON.parse(body);
+        sentMessage = parsed.text || "";
+      }
+      return {
+        ok: true,
+        json: () => Promise.resolve({ ok: true, channel: { id: "D123" }, ts: "1234.5678" }),
+      };
+    }));
+
+    await sendWeeklyCheckins(mockEnv);
+
+    expect(sentMessage).toContain("Target: TBD");
+    expect(sentMessage).toContain("No active projects yet");
   });
 
   it("groups multiple initiatives per owner", async () => {

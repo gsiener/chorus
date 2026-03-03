@@ -32,11 +32,23 @@ export interface CheckInRecord {
   initiativeCount: number;
 }
 
+interface OwnerInitiativeProject {
+  name: string;
+  status: string;
+  progress: number;
+}
+
 interface OwnerInitiative {
   name: string;
   status: string;
   rank: number;
   slackChannel: string | null;
+  targetDate: string | null;
+  techRisk: string | null;
+  theme: string | null;
+  url: string;
+  activeProjects: OwnerInitiativeProject[];
+  progress: number | null;
 }
 
 /**
@@ -60,12 +72,29 @@ async function getInitiativesByOwner(
     const slackId = ownerSlackIds.get(init.owner.email.toLowerCase());
     if (!slackId) continue;
 
-    const { slackChannel } = extractPriorityMetadata(init);
+    const { slackChannel, techRisk, theme } = extractPriorityMetadata(init);
+    const activeProjects = init.projects.nodes
+      .filter((p) => p.status.name === "In Progress")
+      .map((p) => ({ name: p.name, status: p.status.name, progress: p.progress }));
+    const avgProgress =
+      activeProjects.length > 0
+        ? Math.round(
+            activeProjects.reduce((sum, p) => sum + p.progress, 0) /
+              activeProjects.length
+          )
+        : null;
+
     const initiative: OwnerInitiative = {
       name: init.name,
       status: init.status,
       rank: Math.round(relation.sortOrder),
       slackChannel,
+      targetDate: init.targetDate,
+      techRisk,
+      theme,
+      url: init.url,
+      activeProjects,
+      progress: avgProgress,
     };
 
     if (!byOwner.has(slackId)) {
@@ -162,57 +191,65 @@ export async function listUserCheckIns(
 }
 
 /**
+ * Format a single initiative detail card
+ */
+function formatInitiativeCard(init: OwnerInitiative): string {
+  const emoji = getStatusEmoji(init.status.toLowerCase());
+  const lines: string[] = [];
+
+  lines.push(`${emoji} *#${init.rank} ${init.name}*`);
+
+  // Status + target date on one line
+  const targetStr = init.targetDate || "TBD";
+  lines.push(`• Status: ${init.status} | Target: ${targetStr}`);
+
+  // Theme + tech risk on one line (if either exists)
+  const metaParts: string[] = [];
+  if (init.theme) metaParts.push(`Theme: ${init.theme}`);
+  if (init.techRisk) metaParts.push(`Tech Risk: ${init.techRisk}`);
+  if (metaParts.length > 0) {
+    lines.push(`• ${metaParts.join(" | ")}`);
+  }
+
+  // Progress + active projects
+  if (init.activeProjects.length > 0) {
+    const projectNames = init.activeProjects.map((p) => p.name).join(", ");
+    lines.push(`• Progress: ${init.progress}% (${projectNames})`);
+  } else {
+    lines.push("• No active projects yet");
+  }
+
+  // Channel
+  if (init.slackChannel) {
+    lines.push(`• Channel: ${init.slackChannel}`);
+  }
+
+  // Linear link
+  lines.push(`• <${init.url}|View in Linear>`);
+
+  return lines.join("\n");
+}
+
+/**
  * Format check-in message for a user
  */
 function formatCheckinMessage(initiatives: OwnerInitiative[]): string {
+  // Sort all initiatives by rank
+  const sorted = [...initiatives].sort((a, b) => a.rank - b.rank);
+
   const lines: string[] = [
     "👋 *Weekly R&D Priority Check-in*",
     "",
-    `You own ${initiatives.length} R&D priorit${initiatives.length === 1 ? "y" : "ies"}:`,
+    `You own ${initiatives.length} R&D priorit${initiatives.length === 1 ? "y" : "ies"}. Everything look right? Only reply if something needs updating.`,
   ];
 
-  // Group by status
-  const byStatus = new Map<string, OwnerInitiative[]>();
-  for (const init of initiatives) {
-    if (!byStatus.has(init.status)) {
-      byStatus.set(init.status, []);
-    }
-    byStatus.get(init.status)!.push(init);
-  }
-
-  // Show by status, sorted by rank within each group
-  const statusOrder = ["Started", "Planned", "Backlog"];
-
-  for (const status of statusOrder) {
-    const inits = byStatus.get(status);
-    if (!inits || inits.length === 0) continue;
-
-    const emoji = getStatusEmoji(status.toLowerCase());
+  for (const init of sorted) {
     lines.push("");
-    lines.push(`*${status}:*`);
-
-    for (const init of inits.sort((a, b) => a.rank - b.rank)) {
-      let line = `${emoji} #${init.rank} ${init.name}`;
-      if (init.slackChannel) {
-        line += ` (${init.slackChannel})`;
-      }
-      lines.push(line);
-    }
-  }
-
-  // Show any statuses not in our preferred order
-  for (const [status, inits] of byStatus) {
-    if (statusOrder.includes(status)) continue;
-    const emoji = getStatusEmoji(status.toLowerCase());
-    lines.push("");
-    lines.push(`*${status}:*`);
-    for (const init of inits.sort((a, b) => a.rank - b.rank)) {
-      lines.push(`${emoji} #${init.rank} ${init.name}`);
-    }
+    lines.push(formatInitiativeCard(init));
   }
 
   lines.push("");
-  lines.push("_Reply to discuss any priority, or use_ `@Chorus priorities` _to see the full list._");
+  lines.push("_If everything looks good, no action needed. Reply to update anything, or use_ `@Chorus priorities` _to see the full list._");
 
   return lines.join("\n");
 }
