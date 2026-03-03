@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { convertThreadToMessages, generateResponse } from "../claude";
+import { RateLimitError } from "../http-utils";
 import type { Env, SlackMessage } from "../types";
 
 describe("convertThreadToMessages", () => {
@@ -125,7 +126,7 @@ describe("generateResponse", () => {
 
     const messages = [{ role: "user" as const, content: "What is the roadmap?" }];
 
-    await expect(generateResponse(messages, mockEnv)).rejects.toThrow("Claude API error: 429");
+    await expect(generateResponse(messages, mockEnv)).rejects.toThrow(RateLimitError);
   });
 
   it("returns fallback message when response has no content", async () => {

@@ -58,7 +58,7 @@ vi.mock("../linear-priorities", async (importOriginal) => {
 });
 
 import { handler, getUserFriendlyErrorMessage } from "../index";
-import { TimeoutError, NetworkError, RateLimitError, ServerError } from "../http-utils";
+import { TimeoutError, NetworkError, RateLimitError, ServerError, HttpError } from "../http-utils";
 import { SlackApiError } from "../slack";
 import type { Env } from "../types";
 
@@ -943,6 +943,18 @@ describe("getUserFriendlyErrorMessage", () => {
   it("returns generic message for unknown errors", () => {
     expect(getUserFriendlyErrorMessage(new Error("something unexpected"))).toBe(
       "Sorry, I encountered an error processing your request."
+    );
+  });
+
+  it("returns context-too-large message for HttpError 400", () => {
+    expect(getUserFriendlyErrorMessage(new HttpError(400, "request too large"))).toContain(
+      "too much context"
+    );
+  });
+
+  it("returns service error message for other HttpErrors", () => {
+    expect(getUserFriendlyErrorMessage(new HttpError(403, "forbidden"))).toContain(
+      "unexpected error"
     );
   });
 
