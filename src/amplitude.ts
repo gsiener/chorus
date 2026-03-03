@@ -197,6 +197,23 @@ async function runInBatches<T>(
 }
 
 /**
+ * Fetch with per-request timeout using AbortController.
+ * Extracted to avoid repeating the abort/timer pattern in each query function.
+ */
+async function fetchWithTimeout(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { headers, signal: abort.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Query Amplitude event segmentation endpoint
  */
 async function querySegmentation(
@@ -221,17 +238,7 @@ async function querySegmentation(
     if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
     if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
 
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), {
-        headers: { Authorization: buildAuthHeader(env) },
-        signal: abort.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    const response = await fetchWithTimeout(url.toString(), { Authorization: buildAuthHeader(env) });
 
     if (!response.ok) {
       const text = await response.text();
@@ -268,17 +275,7 @@ async function queryRetention(
     if (params.i !== undefined) url.searchParams.set("i", String(params.i));
     if (params.s) url.searchParams.set("s", JSON.stringify(params.s));
 
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), {
-        headers: { Authorization: buildAuthHeader(env) },
-        signal: abort.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    const response = await fetchWithTimeout(url.toString(), { Authorization: buildAuthHeader(env) });
 
     if (!response.ok) {
       const text = await response.text();
@@ -415,17 +412,7 @@ async function fetchCanvasMCPUsers(
   url.searchParams.set("end", end);
 
   return fetchWithRetry(async () => {
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), FETCH_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(url.toString(), {
-        headers: { Authorization: buildAuthHeader(env) },
-        signal: abort.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    const response = await fetchWithTimeout(url.toString(), { Authorization: buildAuthHeader(env) });
 
     if (!response.ok) {
       const text = await response.text();

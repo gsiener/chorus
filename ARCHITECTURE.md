@@ -201,7 +201,7 @@ Protected by `DOCS_API_KEY` header:
 | `/api/docs` | POST | Add document |
 | `/api/docs` | GET | List documents |
 | `/api/docs` | DELETE | Remove document |
-| `/api/test-checkin` | POST | Trigger manual check-in |
+| `/api/test-feedback-digest` | POST | Trigger manual feedback digest |
 | `/api/test-telemetry` | POST | Test Claude telemetry |
 
 ### Scheduled Check-ins

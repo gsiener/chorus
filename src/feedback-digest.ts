@@ -4,8 +4,9 @@
  */
 
 import type { Env, FeedbackRecord, FeedbackMetadata } from "./types";
-import { postDirectMessage } from "./slack";
+import { postDirectMessage, getPermalink, getBotUserId } from "./slack";
 import { FEEDBACK_KV_PREFIX } from "./constants";
+import { truncate } from "./primitives/formatters";
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
@@ -34,23 +35,25 @@ export async function sendDailyFeedbackDigest(
     // Resolve bot user ID to filter out self-reactions (e.g. bot's own thumbs-up ack)
     const botUserId = await getBotUserId(env);
 
-    // Fetch full records to check reactedAt timestamp
-    const recentFeedback: FeedbackRecord[] = [];
-    for (const key of withFeedback) {
-      const record = await env.DOCS_KV.get<FeedbackRecord>(key.name, "json");
-      if (!record?.feedback?.reactedAt) continue;
-      if (record.feedback.reactor === botUserId) continue;
+    // Fetch full records in parallel to check reactedAt timestamp
+    const records = await Promise.all(
+      withFeedback.map((key) => env.DOCS_KV.get<FeedbackRecord>(key.name, "json"))
+    );
+    const recentFeedback = records.filter((record): record is FeedbackRecord => {
+      if (!record?.feedback?.reactedAt) return false;
+      if (record.feedback.reactor === botUserId) return false;
+      return new Date(record.feedback.reactedAt).getTime() >= cutoff;
+    });
 
-      const reactedAtMs = new Date(record.feedback.reactedAt).getTime();
-      if (reactedAtMs >= cutoff) {
-        recentFeedback.push(record);
-      }
-    }
-
-    // Resolve permalinks for each entry
+    // Resolve permalinks in parallel
+    const permalinkEntries = await Promise.all(
+      recentFeedback.map(async (entry) => {
+        const link = await getPermalink(entry.channel, entry.ts, env);
+        return [entry, link] as const;
+      })
+    );
     const permalinks = new Map<string, string>();
-    for (const entry of recentFeedback) {
-      const link = await getPermalink(entry.channel, entry.ts, env);
+    for (const [entry, link] of permalinkEntries) {
       if (link) permalinks.set(`${entry.channel}:${entry.ts}`, link);
     }
 
@@ -105,9 +108,7 @@ function formatDigestMessage(entries: FeedbackRecord[], permalinks: Map<string, 
   for (const entry of sorted) {
     const emoji = entry.feedback?.type === "positive" ? "👍" : "👎";
     const reactor = entry.feedback?.reactor ? `<@${entry.feedback.reactor}>` : "unknown";
-    const promptExcerpt = entry.prompt.length > 80
-      ? entry.prompt.slice(0, 80) + "…"
-      : entry.prompt;
+    const promptExcerpt = truncate(entry.prompt, 80);
     const time = entry.feedback?.reactedAt
       ? new Date(entry.feedback.reactedAt).toLocaleTimeString("en-US", {
           hour: "numeric",
@@ -127,27 +128,3 @@ function formatDigestMessage(entries: FeedbackRecord[], permalinks: Map<string, 
   return lines.join("\n").trimEnd();
 }
 
-async function getPermalink(channel: string, ts: string, env: Env): Promise<string | null> {
-  try {
-    const url = `https://slack.com/api/chat.getPermalink?channel=${channel}&message_ts=${ts}`;
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` },
-    });
-    const data = (await response.json()) as { ok: boolean; permalink?: string };
-    return data.ok && data.permalink ? data.permalink : null;
-  } catch {
-    return null;
-  }
-}
-
-async function getBotUserId(env: Env): Promise<string | null> {
-  try {
-    const response = await fetch("https://slack.com/api/auth.test", {
-      headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` },
-    });
-    const data = (await response.json()) as { ok: boolean; user_id?: string };
-    return data.ok && data.user_id ? data.user_id : null;
-  } catch {
-    return null;
-  }
-}

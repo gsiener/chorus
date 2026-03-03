@@ -95,5 +95,3 @@ export function parseSearchCommand(text: string, botUserId: string): SearchComma
 
   return null;
 }
-
-// Check-in command types

@@ -265,6 +265,63 @@ export async function postDirectMessage(
   }
 }
 
+// Get message permalink
+
+interface PermalinkResponse extends SlackApiResponse {
+  permalink?: string;
+}
+
+export async function getPermalink(
+  channel: string,
+  messageTs: string,
+  env: Env
+): Promise<string | null> {
+  try {
+    const data = await slackFetch<PermalinkResponse>(
+      `https://slack.com/api/chat.getPermalink?channel=${channel}&message_ts=${messageTs}`,
+      {},
+      env.SLACK_BOT_TOKEN
+    );
+    return data.permalink ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Bot user ID (cached in-memory with TTL)
+
+let cachedBotUserId: string | null = null;
+let botUserIdCacheExpiry = 0;
+
+export async function getBotUserId(env: Env): Promise<string | null> {
+  const now = Date.now();
+  if (cachedBotUserId && now < botUserIdCacheExpiry) {
+    return cachedBotUserId;
+  }
+
+  try {
+    const data = await slackFetch<SlackApiResponse & { user_id?: string }>(
+      "https://slack.com/api/auth.test",
+      {},
+      env.SLACK_BOT_TOKEN
+    );
+    if (data.user_id) {
+      cachedBotUserId = data.user_id;
+      botUserIdCacheExpiry = now + 60 * 60 * 1000; // 1 hour
+      return data.user_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reset cached bot user ID (for testing) */
+export function resetBotUserIdCache(): void {
+  cachedBotUserId = null;
+  botUserIdCacheExpiry = 0;
+}
+
 /**
  * User info returned from Slack API
  */

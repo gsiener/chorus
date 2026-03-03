@@ -3,9 +3,9 @@ import {
   parseDocCommand,
   parseSearchCommand,
 } from "./parseCommands";
-import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError } from "./slack";
+import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError, getBotUserId } from "./slack";
 import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
-import { TimeoutError, NetworkError, RateLimitError, ServerError } from "./http-utils";
+import { TimeoutError, NetworkError, RateLimitError, ServerError, HttpError } from "./http-utils";
 import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
 import { searchDocuments, formatSearchResultsForUser } from "./embeddings";
@@ -34,7 +34,6 @@ import {
   RATE_LIMITS,
   EVENT_DEDUP_TTL_SECONDS,
   EVENT_DEDUP_KEY_PREFIX,
-  BOT_ID_CACHE_TTL_MS,
 } from "./constants";
 
 // OpenTelemetry configuration for Honeycomb export
@@ -143,23 +142,32 @@ function verifyApiKey(request: Request, env: Env): boolean {
   return token === env.DOCS_API_KEY;
 }
 
+const JSON_HEADERS = { "Content-Type": "application/json" } as const;
+
+/**
+ * Guard an API request: verify API key and HTTP method.
+ * Returns an error Response if the check fails, or null if the request is valid.
+ */
+function guardApiRequest(request: Request, env: Env, method: string): Response | null {
+  if (!verifyApiKey(request, env)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: JSON_HEADERS,
+    });
+  }
+  if (request.method !== method) {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405, headers: JSON_HEADERS,
+    });
+  }
+  return null;
+}
+
 /**
  * Handle /api/health - check connectivity to Slack, Claude, and KV
  */
 async function handleHealth(request: Request, env: Env): Promise<Response> {
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "GET");
+  if (guard) return guard;
 
   const start = Date.now();
 
@@ -186,7 +194,7 @@ async function handleHealth(request: Request, env: Env): Promise<Response> {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: CLAUDE_MODEL,
           max_tokens: 5,
           messages: [{ role: "user", content: "Say OK" }],
         }),
@@ -232,23 +240,11 @@ async function handleHealth(request: Request, env: Env): Promise<Response> {
 }
 
 /**
- * Handle /api/test-checkin - trigger a test feedback digest DM
+ * Handle /api/test-feedback-digest - trigger a test feedback digest DM
  */
-async function handleTestCheckin(request: Request, env: Env): Promise<Response> {
-  // Verify API key
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+async function handleTestFeedbackDigest(request: Request, env: Env): Promise<Response> {
+  const guard = guardApiRequest(request, env, "POST");
+  if (guard) return guard;
 
   console.log("Manual feedback digest triggered via API");
   const result = await sendDailyFeedbackDigest(env);
@@ -263,20 +259,8 @@ async function handleTestCheckin(request: Request, env: Env): Promise<Response> 
  * Handle /api/debug/priorities - debug Linear priorities integration
  */
 async function handleDebugPriorities(request: Request, env: Env): Promise<Response> {
-  // Verify API key
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "GET");
+  if (guard) return guard;
 
   console.log("Debug priorities triggered via API");
 
@@ -338,19 +322,8 @@ async function handleDebugPriorities(request: Request, env: Env): Promise<Respon
  * Handle /api/debug/amplitude - debug Amplitude metrics integration
  */
 async function handleDebugAmplitude(request: Request, env: Env): Promise<Response> {
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "GET");
+  if (guard) return guard;
 
   console.log("Debug Amplitude triggered via API");
 
@@ -397,19 +370,8 @@ async function handleDebugAmplitude(request: Request, env: Env): Promise<Respons
  * Handle /api/test-metrics - post a test metrics report to the test channel
  */
 async function handleTestMetrics(request: Request, env: Env): Promise<Response> {
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "POST");
+  if (guard) return guard;
 
   const url = new URL(request.url);
   const channel = url.searchParams.get("channel");
@@ -436,20 +398,8 @@ async function handleTestMetrics(request: Request, env: Env): Promise<Response> 
  * Handle /api/test-telemetry - trigger a Claude call to test telemetry
  */
 async function handleTestTelemetry(request: Request, env: Env): Promise<Response> {
-  // Verify API key
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "POST");
+  if (guard) return guard;
 
   console.log("Test telemetry triggered via API");
 
@@ -473,20 +423,8 @@ async function handleTestTelemetry(request: Request, env: Env): Promise<Response
  * Handle /api/ask - ask Chorus a question directly via API
  */
 async function handleAsk(request: Request, env: Env): Promise<Response> {
-  // Verify API key
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "POST");
+  if (guard) return guard;
 
   let body: { question?: string };
   try {
@@ -533,20 +471,8 @@ async function handleAsk(request: Request, env: Env): Promise<Response> {
  * - data: {"done": true, "inputTokens": N, "outputTokens": N} when complete
  */
 async function handleStreamApi(request: Request, env: Env): Promise<Response> {
-  // Verify API key
-  if (!verifyApiKey(request, env)) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (request.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed. Use GET with ?question= parameter" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const guard = guardApiRequest(request, env, "GET");
+  if (guard) return guard;
 
   const url = new URL(request.url);
   const question = url.searchParams.get("question");
@@ -615,11 +541,9 @@ async function handleStreamApi(request: Request, env: Env): Promise<Response> {
  * Handle /api/docs requests for console-based document management
  */
 async function handleDocsApi(request: Request, env: Env): Promise<Response> {
-  // Verify API key
   if (!verifyApiKey(request, env)) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
+      status: 401, headers: JSON_HEADERS,
     });
   }
 
@@ -835,9 +759,9 @@ export const handler = {
       return handleDocsApi(request, env);
     }
 
-    // Route /api/test-checkin to trigger manual check-in
-    if (url.pathname === "/api/test-checkin") {
-      return handleTestCheckin(request, env);
+    // Route /api/test-feedback-digest to trigger manual feedback digest
+    if (url.pathname === "/api/test-feedback-digest") {
+      return handleTestFeedbackDigest(request, env);
     }
 
     // Route /api/test-telemetry to test Claude telemetry
@@ -954,6 +878,12 @@ export function getUserFriendlyErrorMessage(error: unknown): string {
   if (error instanceof SlackApiError) {
     return "I ran into an issue communicating with Slack. Please try again.";
   }
+  if (error instanceof HttpError) {
+    if (error.status === 400) {
+      return "Your question requires too much context for me to process. Try asking in a new thread or simplifying your question.";
+    }
+    return "I received an unexpected error from one of my services. Please try again.";
+  }
   return "Sorry, I encountered an error processing your request.";
 }
 
@@ -986,6 +916,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     });
     const threadTs = thread_ts ?? ts;
     const botUserId = await getBotUserId(env);
+    if (!botUserId) throw new Error("Failed to get bot user ID");
     const cleanedText = text.replace(new RegExp(`<@${botUserId}>`, "g"), "").trim();
 
     // Handle help command
@@ -1285,36 +1216,3 @@ async function handleReaction(payload: SlackEventCallback, env: Env): Promise<vo
   }
 }
 
-// Cache the bot user ID with TTL (imported from constants)
-let cachedBotUserId: string | null = null;
-let botUserIdCacheExpiry = 0;
-
-async function getBotUserId(env: Env): Promise<string> {
-  const now = Date.now();
-
-  if (cachedBotUserId && now < botUserIdCacheExpiry) {
-    return cachedBotUserId;
-  }
-
-  const response = await fetch("https://slack.com/api/auth.test", {
-    headers: {
-      Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
-    },
-  });
-
-  const data = (await response.json()) as { ok: boolean; user_id?: string };
-
-  if (data.ok && data.user_id) {
-    cachedBotUserId = data.user_id;
-    botUserIdCacheExpiry = now + BOT_ID_CACHE_TTL_MS;
-    return data.user_id;
-  }
-
-  throw new Error("Failed to get bot user ID");
-}
-
-// For testing - reset the cached bot user ID
-export function resetBotUserIdCache(): void {
-  cachedBotUserId = null;
-  botUserIdCacheExpiry = 0;
-}
