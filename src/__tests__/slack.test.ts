@@ -7,6 +7,10 @@ import {
   addReaction,
   postDirectMessage,
   fetchUserInfo,
+  startStream,
+  appendStream,
+  stopStream,
+  SlackStreamWriter,
 } from "../slack";
 import type { Env } from "../types";
 
@@ -577,5 +581,255 @@ describe("fetchUserInfo", () => {
     const result = await fetchUserInfo("U999", mockEnv);
 
     expect(result).toBeNull();
+  });
+});
+
+describe("startStream", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns channel and ts on success", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, channel: "C123", ts: "1700000001.000000" }))
+    );
+
+    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+
+    expect(result).toEqual({ channel: "C123", ts: "1700000001.000000" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.startStream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          channel: "C123",
+          thread_ts: "1234.5678",
+          recipient_user_id: "U456",
+        }),
+      })
+    );
+  });
+
+  it("returns null on API error", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "not_allowed" }))
+    );
+
+    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when response missing ts", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, channel: "C123" }))
+    );
+
+    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("appendStream", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("appends text successfully", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, channel: "C123", ts: "1700000001.000000" }))
+    );
+
+    const result = await appendStream("C123", "1700000001.000000", "Hello ", mockEnv);
+
+    expect(result).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.appendStream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          channel: "C123",
+          ts: "1700000001.000000",
+          markdown_text: "Hello ",
+        }),
+      })
+    );
+  });
+
+  it("returns false on API error", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "stream_not_found" }))
+    );
+
+    const result = await appendStream("C123", "1700000001.000000", "text", mockEnv);
+
+    expect(result).toBe(false);
+  });
+});
+
+describe("stopStream", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns final ts on success", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, channel: "C123", ts: "1700000001.000000" }))
+    );
+
+    const result = await stopStream("C123", "1700000001.000000", mockEnv);
+
+    expect(result).toBe("1700000001.000000");
+    expect(fetch).toHaveBeenCalledWith(
+      "https://slack.com/api/chat.stopStream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ channel: "C123", ts: "1700000001.000000" }),
+      })
+    );
+  });
+
+  it("returns null on API error", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: false, error: "stream_not_found" }))
+    );
+
+    const result = await stopStream("C123", "1700000001.000000", mockEnv);
+
+    expect(result).toBeNull();
+  });
+});
+
+describe("SlackStreamWriter", () => {
+  const mockEnv: Env = {
+    SLACK_BOT_TOKEN: "xoxb-test-token",
+    SLACK_SIGNING_SECRET: "test-secret",
+    ANTHROPIC_API_KEY: "test-key",
+    HONEYCOMB_API_KEY: "test-honeycomb-key",
+    DOCS_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn() } as unknown as KVNamespace,
+    VECTORIZE: { query: vi.fn(), insert: vi.fn() } as unknown as VectorizeIndex,
+    AI: { run: vi.fn() } as unknown as Ai,
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ ok: true, channel: "C123", ts: "1700000001.000000" })))
+    ));
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("flushes immediately on first chunk", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv);
+
+    await writer.write("Hi");
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(body.markdown_text).toBe("Hi");
+  });
+
+  it("buffers subsequent small chunks", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv, 20);
+
+    await writer.write("First"); // flushes immediately (first chunk)
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await writer.write("ab"); // buffered (2 < 20)
+    expect(fetch).toHaveBeenCalledTimes(1); // no new flush yet
+  });
+
+  it("flushes when buffer exceeds threshold", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv, 10);
+
+    await writer.write("First"); // flushes immediately
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await writer.write("This exceeds the threshold"); // > 10 chars, flushes
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(body.markdown_text).toBe("This exceeds the threshold");
+  });
+
+  it("flush() sends remaining buffer", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv, 100);
+
+    await writer.write("First"); // flushes immediately
+    await writer.write("remaining"); // buffered (< 100)
+
+    await writer.flush();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(body.markdown_text).toBe("remaining");
+  });
+
+  it("flush() is a no-op when buffer is empty", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv);
+
+    await writer.flush();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("flushes on timer when buffer is not full", async () => {
+    const writer = new SlackStreamWriter("C123", "1700000001.000000", mockEnv, 100, 150);
+
+    await writer.write("First"); // flushes immediately
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await writer.write("timer"); // buffered, starts timer
+
+    // Advance timer
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(body.markdown_text).toBe("timer");
   });
 });

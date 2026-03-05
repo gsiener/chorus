@@ -3,8 +3,8 @@ import {
   parseDocCommand,
   parseSearchCommand,
 } from "./parseCommands";
-import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError, getBotUserId } from "./slack";
-import { convertThreadToMessages, generateResponse, generateResponseStreaming, ThreadInfo, CLAUDE_MODEL } from "./claude";
+import { verifySlackSignature, fetchThreadMessages, postMessage, updateMessage, addReaction, SlackApiError, getBotUserId, startStream, appendStream, stopStream, SlackStreamWriter } from "./slack";
+import { convertThreadToMessages, generateResponse, generateResponseStreaming, convertToSlackFormat, ThreadInfo, CLAUDE_MODEL } from "./claude";
 import { TimeoutError, NetworkError, RateLimitError, ServerError, HttpError } from "./http-utils";
 import { addDocument, updateDocument, removeDocument, listDocuments, backfillDocuments, getRandomDocument, backfillIfNeeded } from "./docs";
 import { extractFileContent, titleFromFilename } from "./files";
@@ -1082,18 +1082,13 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     let threadFetchMs: number | undefined;
 
     if (thread_ts) {
-      // Fetch thread history and post thinking message in parallel
       const threadFetchStart = Date.now();
-      const [threadMessages, thinkingResult] = await Promise.all([
-        fetchThreadMessages(channel, thread_ts, env),
-        postMessage(channel, "✨ Thinking...", threadTs, env),
-      ]);
+      const threadMessages = await fetchThreadMessages(channel, thread_ts, env);
       threadFetchMs = Date.now() - threadFetchStart;
       recordSlackLatency({ threadFetchMs });
 
       messages = convertThreadToMessages(threadMessages, botUserId);
       threadMessageCount = threadMessages.length;
-      thinkingTs = thinkingResult;
 
       // Record thread context for observability
       const userMessages = threadMessages.filter(m => m.user !== botUserId).length;
@@ -1104,57 +1099,127 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
         botMessageCount: botMessages,
       });
     } else {
-      // New thread - just use the current message
       messages = [
         {
           role: "user" as const,
           content: cleanedText,
         },
       ];
-      thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
     }
 
-    if (!thinkingTs) {
-      throw new Error("Failed to post thinking message");
-    }
-
-    // Generate response with thread context and user info
     const threadInfo: ThreadInfo | undefined = threadTs ? { channel, threadTs } : undefined;
-    const result = await generateResponse(messages, env, threadInfo, user);
+    const streamingEnabled = env.ENABLE_SLACK_STREAMING !== "false";
 
-    // Update with final response (with timing)
-    const updateStart = Date.now();
-    await updateMessage(channel, thinkingTs, result.text, env);
-    const messageUpdateMs = Date.now() - updateStart;
-    recordSlackLatency({ messageUpdateMs });
+    // Try streaming first
+    let streamInfo: { channel: string; ts: string } | null = null;
+    if (streamingEnabled) {
+      try {
+        streamInfo = await startStream(channel, threadTs, user, env);
+      } catch (error) {
+        console.warn("Failed to start stream, falling back to thinking message:", error);
+      }
+    }
 
-    // Add feedback reactions (fire-and-forget — user already sees the response)
-    Promise.all([
-      addReaction(channel, thinkingTs, "thumbsup", env),
-      addReaction(channel, thinkingTs, "thumbsdown", env),
-    ]).catch(err => console.warn("Reaction add failed:", err));
+    if (streamInfo) {
+      // === Streaming path ===
+      const streamWriter = new SlackStreamWriter(streamInfo.channel, streamInfo.ts, env);
+      try {
+        const result = await generateResponseStreaming(
+          messages, env,
+          async (chunk) => { await streamWriter.write(chunk); },
+          threadInfo, user
+        );
 
-    // Record comprehensive Claude response context for wide events
-    recordClaudeResponse({
-      responseLength: result.text.length,
-      cached: result.cached,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      messagesCount: messages.length,
-      hasKnowledgeBase: true, // Knowledge base is always searched for context
-    });
+        // Flush remaining buffer and stop the stream
+        await streamWriter.flush();
+        await stopStream(channel, streamInfo.ts, env);
 
-    // Store feedback record for the feedback log (fire-and-forget)
-    storeFeedbackRecord(env, {
-      prompt: cleanedText,
-      response: result.text,
-      user,
-      channel,
-      ts: thinkingTs,
-      timestamp: new Date().toISOString(),
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-    }).catch(err => console.warn("Feedback record store failed:", err));
+        // Apply Slack mrkdwn formatting via chat.update
+        const updateStart = Date.now();
+        await updateMessage(channel, streamInfo.ts, result.text, env);
+        const messageUpdateMs = Date.now() - updateStart;
+        recordSlackLatency({ messageUpdateMs });
+
+        // Add feedback reactions (fire-and-forget)
+        Promise.all([
+          addReaction(channel, streamInfo.ts, "thumbsup", env),
+          addReaction(channel, streamInfo.ts, "thumbsdown", env),
+        ]).catch(err => console.warn("Reaction add failed:", err));
+
+        recordClaudeResponse({
+          responseLength: result.text.length,
+          cached: result.cached,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          messagesCount: messages.length,
+          hasKnowledgeBase: true,
+        });
+
+        storeFeedbackRecord(env, {
+          prompt: cleanedText,
+          response: result.text,
+          user,
+          channel,
+          ts: streamInfo.ts,
+          timestamp: new Date().toISOString(),
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        }).catch(err => console.warn("Feedback record store failed:", err));
+      } catch (error) {
+        // Error during streaming - append error and finalize
+        console.error("Error during streaming:", error);
+        if (error instanceof Error) {
+          recordCategorizedError(error, "handleMention:streaming");
+        }
+        const errorMessage = getUserFriendlyErrorMessage(error);
+        try {
+          await appendStream(channel, streamInfo.ts, `\n\n${errorMessage}`, env);
+          await stopStream(channel, streamInfo.ts, env);
+        } catch {
+          // stopStream failed - fall back to postMessage
+          await postMessage(channel, errorMessage, threadTs, env);
+        }
+      }
+    } else {
+      // === Fallback: thinking message path ===
+      thinkingTs = await postMessage(channel, "✨ Thinking...", threadTs, env);
+      if (!thinkingTs) {
+        throw new Error("Failed to post thinking message");
+      }
+
+      const result = await generateResponse(messages, env, threadInfo, user);
+
+      const updateStart = Date.now();
+      await updateMessage(channel, thinkingTs, result.text, env);
+      const messageUpdateMs = Date.now() - updateStart;
+      recordSlackLatency({ messageUpdateMs });
+
+      // Add feedback reactions (fire-and-forget)
+      Promise.all([
+        addReaction(channel, thinkingTs, "thumbsup", env),
+        addReaction(channel, thinkingTs, "thumbsdown", env),
+      ]).catch(err => console.warn("Reaction add failed:", err));
+
+      recordClaudeResponse({
+        responseLength: result.text.length,
+        cached: result.cached,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        messagesCount: messages.length,
+        hasKnowledgeBase: true,
+      });
+
+      storeFeedbackRecord(env, {
+        prompt: cleanedText,
+        response: result.text,
+        user,
+        channel,
+        ts: thinkingTs,
+        timestamp: new Date().toISOString(),
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      }).catch(err => console.warn("Feedback record store failed:", err));
+    }
   } catch (error) {
     console.error("Error handling mention:", error);
     if (error instanceof Error) {

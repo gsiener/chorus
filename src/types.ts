@@ -10,6 +10,7 @@ export interface Env {
   FEEDBACK_DIGEST_USER?: string; // Slack user ID to receive daily feedback digest DMs
   RD_PRIORITIES_INITIATIVE_ID?: string; // Linear parent initiative ID for R&D Priorities
   COMPANY_NAME?: string; // Company name used in system prompt context (default: "the company")
+  ENABLE_SLACK_STREAMING?: string; // "true" (default) or "false" to disable streaming
   DOCS_KV: KVNamespace;
   VECTORIZE: VectorizeIndex;
   AI: Ai;

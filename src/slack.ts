@@ -111,6 +111,141 @@ async function slackFetch<T extends SlackApiResponse>(
   return data;
 }
 
+// Streaming API
+
+interface StreamResponse extends SlackApiResponse {
+  channel?: string;
+  ts?: string;
+}
+
+/**
+ * Start a streaming message in a Slack thread.
+ * Returns { channel, ts } on success, or null on failure.
+ */
+export async function startStream(
+  channel: string,
+  threadTs: string,
+  recipientUserId: string,
+  env: Env
+): Promise<{ channel: string; ts: string } | null> {
+  try {
+    const data = await slackFetch<StreamResponse>(
+      "https://slack.com/api/chat.startStream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel,
+          thread_ts: threadTs,
+          recipient_user_id: recipientUserId,
+        }),
+      },
+      env.SLACK_BOT_TOKEN
+    );
+    if (!data.channel || !data.ts) return null;
+    return { channel: data.channel, ts: data.ts };
+  } catch (error) {
+    console.error("Failed to start stream:", error);
+    return null;
+  }
+}
+
+/**
+ * Append text to an active stream.
+ */
+export async function appendStream(
+  channel: string,
+  ts: string,
+  text: string,
+  env: Env
+): Promise<boolean> {
+  try {
+    await slackFetch<StreamResponse>(
+      "https://slack.com/api/chat.appendStream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, ts, markdown_text: text }),
+      },
+      env.SLACK_BOT_TOKEN
+    );
+    return true;
+  } catch (error) {
+    console.error("Failed to append stream:", error);
+    return false;
+  }
+}
+
+/**
+ * Stop a streaming message, finalizing it.
+ * Returns the final message ts, or null on failure.
+ */
+export async function stopStream(
+  channel: string,
+  ts: string,
+  env: Env
+): Promise<string | null> {
+  try {
+    const data = await slackFetch<StreamResponse>(
+      "https://slack.com/api/chat.stopStream",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel, ts }),
+      },
+      env.SLACK_BOT_TOKEN
+    );
+    return data.ts ?? null;
+  } catch (error) {
+    console.error("Failed to stop stream:", error);
+    return null;
+  }
+}
+
+/**
+ * Buffered writer for Slack streaming.
+ * Flushes immediately on first chunk for fast time-to-first-visible,
+ * then buffers subsequent chunks until threshold is reached.
+ */
+export class SlackStreamWriter {
+  private buffer = "";
+  private firstChunk = true;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private channel: string,
+    private ts: string,
+    private env: Env,
+    private bufferSize = 50,
+    private flushIntervalMs = 150
+  ) {}
+
+  async write(text: string): Promise<void> {
+    this.buffer += text;
+
+    if (this.firstChunk || this.buffer.length >= this.bufferSize) {
+      await this.flush();
+    } else if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => {
+        this.flush();
+      }, this.flushIntervalMs);
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (this.buffer.length === 0) return;
+
+    const text = this.buffer;
+    this.buffer = "";
+    this.firstChunk = false;
+    await appendStream(this.channel, this.ts, text, this.env);
+  }
+}
+
 // Thread messages
 
 interface ThreadResponse extends SlackApiResponse {
