@@ -433,13 +433,17 @@ export async function generateResponseStreaming(
   let fullText = "";
   let inputTokens = 0;
   let outputTokens = 0;
+  let lineBuf = ""; // Buffer for incomplete lines split across chunks
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     const chunk = decoder.decode(value, { stream: true });
-    const lines = chunk.split('\n');
+    lineBuf += chunk;
+    const lines = lineBuf.split('\n');
+    // Keep the last element — it may be incomplete (no trailing newline)
+    lineBuf = lines.pop() ?? "";
 
     for (const line of lines) {
       if (line.startsWith('data: ')) {
