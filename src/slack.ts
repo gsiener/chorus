@@ -126,6 +126,7 @@ export async function startStream(
   channel: string,
   threadTs: string,
   recipientUserId: string,
+  recipientTeamId: string,
   env: Env
 ): Promise<{ channel: string; ts: string } | null> {
   try {
@@ -138,6 +139,7 @@ export async function startStream(
           channel,
           thread_ts: threadTs,
           recipient_user_id: recipientUserId,
+          recipient_team_id: recipientTeamId,
         }),
       },
       env.SLACK_BOT_TOKEN

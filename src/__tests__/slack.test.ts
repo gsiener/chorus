@@ -608,7 +608,7 @@ describe("startStream", () => {
       new Response(JSON.stringify({ ok: true, channel: "C123", ts: "1700000001.000000" }))
     );
 
-    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+    const result = await startStream("C123", "1234.5678", "U456", "T789", mockEnv);
 
     expect(result).toEqual({ channel: "C123", ts: "1700000001.000000" });
     expect(fetch).toHaveBeenCalledWith(
@@ -619,6 +619,7 @@ describe("startStream", () => {
           channel: "C123",
           thread_ts: "1234.5678",
           recipient_user_id: "U456",
+          recipient_team_id: "T789",
         }),
       })
     );
@@ -629,7 +630,7 @@ describe("startStream", () => {
       new Response(JSON.stringify({ ok: false, error: "not_allowed" }))
     );
 
-    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+    const result = await startStream("C123", "1234.5678", "U456", "T789", mockEnv);
 
     expect(result).toBeNull();
   });
@@ -639,7 +640,7 @@ describe("startStream", () => {
       new Response(JSON.stringify({ ok: true, channel: "C123" }))
     );
 
-    const result = await startStream("C123", "1234.5678", "U456", mockEnv);
+    const result = await startStream("C123", "1234.5678", "U456", "T789", mockEnv);
 
     expect(result).toBeNull();
   });

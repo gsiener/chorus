@@ -1114,7 +1114,7 @@ async function handleMention(payload: SlackEventCallback, env: Env): Promise<voi
     let streamInfo: { channel: string; ts: string } | null = null;
     if (streamingEnabled) {
       try {
-        streamInfo = await startStream(channel, threadTs, user, env);
+        streamInfo = await startStream(channel, threadTs, user, payload.team_id, env);
       } catch (error) {
         console.warn("Failed to start stream, falling back to thinking message:", error);
       }

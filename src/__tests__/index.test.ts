@@ -158,6 +158,7 @@ describe("Worker", () => {
   it("acknowledges app_mention event and processes in background", async () => {
     const body = JSON.stringify({
       type: "event_callback",
+      team_id: "T123",
       event_id: "Ev123",
       event_time: 1234567890,
       event: {
@@ -180,6 +181,7 @@ describe("Worker", () => {
   it("returns OK for unhandled event types", async () => {
     const body = JSON.stringify({
       type: "event_callback",
+      team_id: "T123",
       event_id: "Ev123",
       event_time: 1234567890,
       event: {
@@ -202,6 +204,7 @@ describe("Worker", () => {
   it("handles help command and triggers background processing", async () => {
     const body = JSON.stringify({
       type: "event_callback",
+      team_id: "T123",
       event_id: "EvHelp1",
       event_time: 1234567890,
       event: {
@@ -550,6 +553,7 @@ describe("Search Command", () => {
   it("handles search command with quoted query", async () => {
     const body = JSON.stringify({
       type: "event_callback",
+      team_id: "T123",
       event_id: "Ev456",
       event_time: 1234567890,
       event: {
@@ -571,6 +575,7 @@ describe("Search Command", () => {
   it("handles search command with unquoted query", async () => {
     const body = JSON.stringify({
       type: "event_callback",
+      team_id: "T123",
       event_id: "Ev789",
       event_time: 1234567890,
       event: {

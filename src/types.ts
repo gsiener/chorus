@@ -29,6 +29,7 @@ export interface SlackUrlVerification {
 
 export interface SlackEventCallback {
   type: "event_callback";
+  team_id: string;
   event: SlackEvent;
   event_id: string;
   event_time: number;
